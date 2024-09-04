@@ -1,3 +1,6 @@
+import unittest
+import sys
+
 from sqlglot import expressions as exp
 from sqlglot.dialects.mysql import MySQL
 from tests.dialects.test_dialect import Validator
@@ -536,9 +539,16 @@ class TestMySQL(Validator):
             },
         )
         self.validate_all(
-            "SELECT DATE_FORMAT('2009-10-04 22:23:00', '%W %M %Y')",
+            "SELECT DATE_FORMAT('2024-08-22 14:53:12', '%a')",
             write={
-                "mysql": "SELECT DATE_FORMAT('2009-10-04 22:23:00', '%W %M %Y')",
+                "mysql": "SELECT DATE_FORMAT('2024-08-22 14:53:12', '%a')",
+                "snowflake": "SELECT TO_CHAR(CAST('2024-08-22 14:53:12' AS TIMESTAMP), 'DY')",
+            },
+        )
+        self.validate_all(
+            "SELECT DATE_FORMAT('2009-10-04 22:23:00', '%a %M %Y')",
+            write={
+                "mysql": "SELECT DATE_FORMAT('2009-10-04 22:23:00', '%a %M %Y')",
                 "snowflake": "SELECT TO_CHAR(CAST('2009-10-04 22:23:00' AS TIMESTAMP), 'DY mmmm yyyy')",
             },
         )
@@ -552,7 +562,7 @@ class TestMySQL(Validator):
         self.validate_all(
             "SELECT DATE_FORMAT('1900-10-04 22:23:00', '%d %y %a %d %m %b')",
             write={
-                "mysql": "SELECT DATE_FORMAT('1900-10-04 22:23:00', '%d %y %W %d %m %b')",
+                "mysql": "SELECT DATE_FORMAT('1900-10-04 22:23:00', '%d %y %a %d %m %b')",
                 "snowflake": "SELECT TO_CHAR(CAST('1900-10-04 22:23:00' AS TIMESTAMP), 'DD yy DY DD mm mon')",
             },
         )
@@ -635,6 +645,53 @@ class TestMySQL(Validator):
                 "postgres": "SELECT TO_TIMESTAMP(col)",
                 "redshift": "SELECT (TIMESTAMP 'epoch' + col * INTERVAL '1 SECOND')",
             },
+        )
+
+        # No timezone, make sure DATETIME captures the correct precision
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.123456+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.123456+00:00' AS DATETIME(6))",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.123+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.123+00:00' AS DATETIME(3))",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15+00:00' AS DATETIME)",
+        )
+
+        # With timezone, make sure the TIMESTAMP constructor is used
+        # also TIMESTAMP doesnt have the subsecond precision truncation issue that DATETIME does so we dont need to TIMESTAMP(6)
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15-08:00', 'America/Los_Angeles')",
+            write_sql="SELECT TIMESTAMP('2023-01-01 13:14:15-08:00')",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15-08:00', 'America/Los_Angeles')",
+            write_sql="SELECT TIMESTAMP('2023-01-01 13:14:15-08:00')",
+        )
+
+    @unittest.skipUnless(
+        sys.version_info >= (3, 11),
+        "Python 3.11 relaxed datetime.fromisoformat() parsing with regards to microseconds",
+    )
+    def test_mysql_time_python311(self):
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.12345+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.12345+00:00' AS DATETIME(6))",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.1234+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.1234+00:00' AS DATETIME(6))",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.12+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.12+00:00' AS DATETIME(3))",
+        )
+        self.validate_identity(
+            "SELECT TIME_STR_TO_TIME('2023-01-01 13:14:15.1+00:00')",
+            write_sql="SELECT CAST('2023-01-01 13:14:15.1+00:00' AS DATETIME(3))",
         )
 
     def test_mysql(self):
@@ -1192,3 +1249,24 @@ COMMENT='客户账户表'"""
                             "mysql": f"DATE_ADD('0000-01-01 00:00:00', INTERVAL (TIMESTAMPDIFF({unit}, '0000-01-01 00:00:00', CAST('2001-02-16 20:38:40' AS DATETIME))) {unit})",
                         },
                     )
+
+    def test_at_time_zone(self):
+        with self.assertLogs() as cm:
+            # Check AT TIME ZONE doesnt discard the column name and also raises a warning
+            self.validate_identity(
+                "SELECT foo AT TIME ZONE 'UTC'",
+                write_sql="SELECT foo",
+            )
+            assert "AT TIME ZONE is not supported" in cm.output[0]
+
+    def test_json_value(self):
+        json_doc = """'{"item": "shoes", "price": "49.95"}'"""
+        self.validate_identity(f"""SELECT JSON_VALUE({json_doc}, '$.price')""")
+        self.validate_identity(
+            f"""SELECT JSON_VALUE({json_doc}, '$.price' RETURNING DECIMAL(4, 2))"""
+        )
+
+        for on_option in ("NULL", "ERROR", "DEFAULT 1"):
+            self.validate_identity(
+                f"""SELECT JSON_VALUE({json_doc}, '$.price' RETURNING DECIMAL(4, 2) {on_option} ON EMPTY {on_option} ON ERROR) AS price"""
+            )

@@ -111,6 +111,11 @@ def temporary_storage_provider(expression: exp.Expression) -> exp.Expression:
 
 
 class Spark2(Hive):
+    ANNOTATORS = {
+        **Hive.ANNOTATORS,
+        exp.Substring: lambda self, e: self._annotate_by_args(e, "this"),
+    }
+
     class Parser(Hive.Parser):
         TRIM_PATTERN_FIRST = True
 
@@ -212,6 +217,8 @@ class Spark2(Hive):
             exp.DateTrunc: lambda self, e: self.func("TRUNC", e.this, unit_to_str(e)),
             exp.DayOfMonth: rename_func("DAYOFMONTH"),
             exp.DayOfWeek: rename_func("DAYOFWEEK"),
+            # (DAY_OF_WEEK(datetime) % 7) + 1 is equivalent to DAYOFWEEK_ISO(datetime)
+            exp.DayOfWeekIso: lambda self, e: f"(({self.func('DAYOFWEEK', e.this)} % 7) + 1)",
             exp.DayOfYear: rename_func("DAYOFYEAR"),
             exp.FileFormatProperty: lambda self, e: f"USING {e.name.upper()}",
             exp.From: transforms.preprocess([_unalias_pivot]),
@@ -229,6 +236,13 @@ class Spark2(Hive):
                 e.expression,
                 e.args["replacement"],
                 e.args.get("position"),
+            ),
+            exp.Select: transforms.preprocess(
+                [
+                    transforms.eliminate_qualify,
+                    transforms.eliminate_distinct_on,
+                    transforms.unnest_to_explode,
+                ]
             ),
             exp.StrToDate: _str_to_date,
             exp.StrToTime: lambda self, e: self.func("TO_TIMESTAMP", e.this, self.format_time(e)),

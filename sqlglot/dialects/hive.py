@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typing as t
+from functools import partial
 
 from sqlglot import exp, generator, parser, tokens, transforms
 from sqlglot.dialects.dialect import (
@@ -32,6 +33,8 @@ from sqlglot.dialects.dialect import (
     unit_to_str,
     var_map_sql,
     sequence_sql,
+    property_sql,
+    build_regexp_extract,
 )
 from sqlglot.transforms import (
     remove_unique_constraints,
@@ -134,10 +137,6 @@ def _array_sort_sql(self: Hive.Generator, expression: exp.ArraySort) -> str:
     return self.func("SORT_ARRAY", expression.this)
 
 
-def _property_sql(self: Hive.Generator, expression: exp.Property) -> str:
-    return f"{self.property_name(expression, string_key=True)}={self.sql(expression, 'value')}"
-
-
 def _str_to_unix_sql(self: Hive.Generator, expression: exp.StrToUnix) -> str:
     return self.func("UNIX_TIMESTAMP", expression.this, time_format("hive")(self, expression))
 
@@ -195,6 +194,8 @@ class Hive(Dialect):
     IDENTIFIERS_CAN_START_WITH_DIGIT = True
     SUPPORTS_USER_DEFINED_TYPES = False
     SAFE_DIVISION = True
+    ARRAY_AGG_INCLUDES_NULLS = None
+    REGEXP_EXTRACT_DEFAULT_GROUP = 1
 
     # https://spark.apache.org/docs/latest/sql-ref-identifier.html#description
     NORMALIZATION_STRATEGY = NormalizationStrategy.CASE_INSENSITIVE
@@ -277,7 +278,7 @@ class Hive(Dialect):
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
             "BASE64": exp.ToBase64.from_arg_list,
-            "COLLECT_LIST": exp.ArrayAgg.from_arg_list,
+            "COLLECT_LIST": lambda args: exp.ArrayAgg(this=seq_get(args, 0), nulls_excluded=True),
             "COLLECT_SET": exp.ArrayUniqueAgg.from_arg_list,
             "DATE_ADD": lambda args: exp.TsOrDsAdd(
                 this=seq_get(args, 0), expression=seq_get(args, 1), unit=exp.Literal.string("DAY")
@@ -309,9 +310,7 @@ class Hive(Dialect):
             "MONTH": lambda args: exp.Month(this=exp.TsOrDsToDate.from_arg_list(args)),
             "PERCENTILE": exp.Quantile.from_arg_list,
             "PERCENTILE_APPROX": exp.ApproxQuantile.from_arg_list,
-            "REGEXP_EXTRACT": lambda args: exp.RegexpExtract(
-                this=seq_get(args, 0), expression=seq_get(args, 1), group=seq_get(args, 2)
-            ),
+            "REGEXP_EXTRACT": build_regexp_extract,
             "SEQUENCE": exp.GenerateSeries.from_arg_list,
             "SIZE": exp.ArraySize.from_arg_list,
             "SPLIT": exp.RegexpSplit.from_arg_list,
@@ -436,6 +435,14 @@ class Hive(Dialect):
             self._match(TokenType.R_BRACE)
             return self.expression(exp.Parameter, this=this, expression=expression)
 
+        def _to_prop_eq(self, expression: exp.Expression, index: int) -> exp.Expression:
+            if isinstance(expression, exp.Column):
+                key = expression.this
+            else:
+                key = exp.to_identifier(f"col{index + 1}")
+
+            return self.expression(exp.PropertyEQ, this=key, expression=expression)
+
     class Generator(generator.Generator):
         LIMIT_FETCH = "LIMIT"
         TABLESAMPLE_WITH_METHOD = False
@@ -481,14 +488,7 @@ class Hive(Dialect):
         TRANSFORMS = {
             **generator.Generator.TRANSFORMS,
             exp.Group: transforms.preprocess([transforms.unalias_group]),
-            exp.Select: transforms.preprocess(
-                [
-                    transforms.eliminate_qualify,
-                    transforms.eliminate_distinct_on,
-                    transforms.unnest_to_explode,
-                ]
-            ),
-            exp.Property: _property_sql,
+            exp.Property: property_sql,
             exp.AnyValue: rename_func("FIRST"),
             exp.ApproxDistinct: approx_count_distinct_sql,
             exp.ArgMax: arg_max_or_min_no_count("MAX_BY"),
@@ -548,6 +548,13 @@ class Hive(Dialect):
             exp.ArrayUniqueAgg: rename_func("COLLECT_SET"),
             exp.Split: lambda self, e: self.func(
                 "SPLIT", e.this, self.func("CONCAT", "'\\\\Q'", e.expression)
+            ),
+            exp.Select: transforms.preprocess(
+                [
+                    transforms.eliminate_qualify,
+                    transforms.eliminate_distinct_on,
+                    partial(transforms.unnest_to_explode, unnest_using_arrays_zip=False),
+                ]
             ),
             exp.StrPosition: strposition_to_locate_sql,
             exp.StrToDate: _str_to_date_sql,

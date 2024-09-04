@@ -98,6 +98,7 @@ class Generator(metaclass=_Generator):
         e: f"EPHEMERAL{(' ' + self.sql(e, 'this')) if e.this else ''}",
         exp.ExcludeColumnConstraint: lambda self, e: f"EXCLUDE {self.sql(e, 'this').lstrip()}",
         exp.ExecuteAsProperty: lambda self, e: self.naked_property(e),
+        exp.Except: lambda self, e: self.set_operations(e),
         exp.ExternalProperty: lambda *_: "EXTERNAL",
         exp.GlobalProperty: lambda *_: "GLOBAL",
         exp.HeapProperty: lambda *_: "HEAP",
@@ -105,6 +106,7 @@ class Generator(metaclass=_Generator):
         exp.InheritsProperty: lambda self, e: f"INHERITS ({self.expressions(e, flat=True)})",
         exp.InlineLengthColumnConstraint: lambda self, e: f"INLINE LENGTH {self.sql(e, 'this')}",
         exp.InputModelProperty: lambda self, e: f"INPUT{self.sql(e, 'this')}",
+        exp.Intersect: lambda self, e: self.set_operations(e),
         exp.IntervalSpan: lambda self, e: f"{self.sql(e, 'this')} TO {self.sql(e, 'expression')}",
         exp.LanguageProperty: lambda self, e: self.naked_property(e),
         exp.LocationProperty: lambda self, e: self.naked_property(e),
@@ -131,6 +133,7 @@ class Generator(metaclass=_Generator):
         ),
         exp.SampleProperty: lambda self, e: f"SAMPLE BY {self.sql(e, 'this')}",
         exp.SecureProperty: lambda *_: "SECURE",
+        exp.SecurityProperty: lambda self, e: f"SECURITY {self.sql(e, 'this')}",
         exp.SetConfigProperty: lambda self, e: self.sql(e, "this"),
         exp.SetProperty: lambda _, e: f"{'MULTI' if e.args.get('multi') else ''}SET",
         exp.SettingsProperty: lambda self, e: f"SETTINGS{self.seg('')}{(self.expressions(e))}",
@@ -149,8 +152,9 @@ class Generator(metaclass=_Generator):
         exp.ToTableProperty: lambda self, e: f"TO {self.sql(e.this)}",
         exp.TransformModelProperty: lambda self, e: self.func("TRANSFORM", *e.expressions),
         exp.TransientProperty: lambda *_: "TRANSIENT",
-        exp.UppercaseColumnConstraint: lambda *_: "UPPERCASE",
+        exp.Union: lambda self, e: self.set_operations(e),
         exp.UnloggedProperty: lambda *_: "UNLOGGED",
+        exp.UppercaseColumnConstraint: lambda *_: "UPPERCASE",
         exp.VarMap: lambda self, e: self.func("MAP", e.args["keys"], e.args["values"]),
         exp.ViewAttributeProperty: lambda self, e: f"WITH {self.sql(e, 'this')}",
         exp.VolatileProperty: lambda *_: "VOLATILE",
@@ -170,8 +174,8 @@ class Generator(metaclass=_Generator):
     # Whether locking reads (i.e. SELECT ... FOR UPDATE/SHARE) are supported
     LOCKING_READS_SUPPORTED = False
 
-    # Always do <set op> distinct or <set op> all
-    EXPLICIT_SET_OP = False
+    # Whether the EXCEPT and INTERSECT operations can return duplicates
+    EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE = True
 
     # Wrap derived values in parens, usually standard but spark doesn't support it
     WRAP_DERIVED_VALUES = True
@@ -448,6 +452,8 @@ class Generator(metaclass=_Generator):
         exp.CopyGrantsProperty: exp.Properties.Location.POST_SCHEMA,
         exp.Cluster: exp.Properties.Location.POST_SCHEMA,
         exp.ClusteredByProperty: exp.Properties.Location.POST_SCHEMA,
+        exp.DistributedByProperty: exp.Properties.Location.POST_SCHEMA,
+        exp.DuplicateKeyProperty: exp.Properties.Location.POST_SCHEMA,
         exp.DataBlocksizeProperty: exp.Properties.Location.POST_NAME,
         exp.DataDeletionProperty: exp.Properties.Location.POST_SCHEMA,
         exp.DefinerProperty: exp.Properties.Location.POST_CREATE,
@@ -495,6 +501,7 @@ class Generator(metaclass=_Generator):
         exp.SampleProperty: exp.Properties.Location.POST_SCHEMA,
         exp.SchemaCommentProperty: exp.Properties.Location.POST_SCHEMA,
         exp.SecureProperty: exp.Properties.Location.POST_CREATE,
+        exp.SecurityProperty: exp.Properties.Location.POST_SCHEMA,
         exp.SerdeProperties: exp.Properties.Location.POST_SCHEMA,
         exp.Set: exp.Properties.Location.POST_SCHEMA,
         exp.SettingsProperty: exp.Properties.Location.POST_SCHEMA,
@@ -534,6 +541,7 @@ class Generator(metaclass=_Generator):
         exp.From,
         exp.Insert,
         exp.Join,
+        exp.MultitableInserts,
         exp.Select,
         exp.SetOperation,
         exp.Update,
@@ -1284,6 +1292,7 @@ class Generator(metaclass=_Generator):
         kind = expression.args["kind"]
         kind = self.dialect.INVERSE_CREATABLE_KIND_MAPPING.get(kind) or kind
         exists_sql = " IF EXISTS " if expression.args.get("exists") else " "
+        concurrently_sql = " CONCURRENTLY" if expression.args.get("concurrently") else ""
         on_cluster = self.sql(expression, "cluster")
         on_cluster = f" {on_cluster}" if on_cluster else ""
         temporary = " TEMPORARY" if expression.args.get("temporary") else ""
@@ -1291,13 +1300,69 @@ class Generator(metaclass=_Generator):
         cascade = " CASCADE" if expression.args.get("cascade") else ""
         constraints = " CONSTRAINTS" if expression.args.get("constraints") else ""
         purge = " PURGE" if expression.args.get("purge") else ""
-        return f"DROP{temporary}{materialized} {kind}{exists_sql}{this}{on_cluster}{expressions}{cascade}{constraints}{purge}"
+        return f"DROP{temporary}{materialized} {kind}{concurrently_sql}{exists_sql}{this}{on_cluster}{expressions}{cascade}{constraints}{purge}"
 
-    def except_sql(self, expression: exp.Except) -> str:
-        return self.set_operations(expression)
+    def set_operation(self, expression: exp.SetOperation) -> str:
+        op_type = type(expression)
+        op_name = op_type.key.upper()
 
-    def except_op(self, expression: exp.Except) -> str:
-        return f"EXCEPT{'' if expression.args.get('distinct') else ' ALL'}"
+        distinct = expression.args.get("distinct")
+        if (
+            distinct is False
+            and op_type in (exp.Except, exp.Intersect)
+            and not self.EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE
+        ):
+            self.unsupported(f"{op_name} ALL is not supported")
+
+        default_distinct = self.dialect.SET_OP_DISTINCT_BY_DEFAULT[op_type]
+
+        if distinct is None:
+            distinct = default_distinct
+            if distinct is None:
+                self.unsupported(f"{op_name} requires DISTINCT or ALL to be specified")
+
+        if distinct is default_distinct:
+            kind = ""
+        else:
+            kind = " DISTINCT" if distinct else " ALL"
+
+        by_name = " BY NAME" if expression.args.get("by_name") else ""
+        return f"{op_name}{kind}{by_name}"
+
+    def set_operations(self, expression: exp.SetOperation) -> str:
+        if not self.SET_OP_MODIFIERS:
+            limit = expression.args.get("limit")
+            order = expression.args.get("order")
+
+            if limit or order:
+                select = exp.subquery(expression, "_l_0", copy=False).select("*", copy=False)
+
+                if limit:
+                    select = select.limit(limit.pop(), copy=False)
+                if order:
+                    select = select.order_by(order.pop(), copy=False)
+                return self.sql(select)
+
+        sqls: t.List[str] = []
+        stack: t.List[t.Union[str, exp.Expression]] = [expression]
+
+        while stack:
+            node = stack.pop()
+
+            if isinstance(node, exp.SetOperation):
+                stack.append(node.expression)
+                stack.append(
+                    self.maybe_comment(
+                        self.set_operation(node), comments=node.comments, separated=True
+                    )
+                )
+                stack.append(node.this)
+            else:
+                sqls.append(self.sql(node))
+
+        this = self.sep().join(sqls)
+        this = self.query_modifiers(expression, this)
+        return self.prepend_ctes(expression, this)
 
     def fetch_sql(self, expression: exp.Fetch) -> str:
         direction = expression.args.get("direction")
@@ -1669,14 +1734,11 @@ class Generator(metaclass=_Generator):
         settings = self.sql(expression, "settings")
         settings = f" {settings}" if settings else ""
 
-        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{expression_sql}"
+        source = self.sql(expression, "source")
+        source = f"TABLE {source}" if source else ""
+
+        sql = f"INSERT{hint}{alternative}{ignore}{this}{stored}{by_name}{exists}{partition_by}{settings}{where}{expression_sql}{source}"
         return self.prepend_ctes(expression, sql)
-
-    def intersect_sql(self, expression: exp.Intersect) -> str:
-        return self.set_operations(expression)
-
-    def intersect_op(self, expression: exp.Intersect) -> str:
-        return f"INTERSECT{'' if expression.args.get('distinct') else ' ALL'}"
 
     def introducer_sql(self, expression: exp.Introducer) -> str:
         return f"{self.sql(expression, 'this')} {self.sql(expression, 'expression')}"
@@ -1943,6 +2005,18 @@ class Generator(metaclass=_Generator):
     def from_sql(self, expression: exp.From) -> str:
         return f"{self.seg('FROM')} {self.sql(expression, 'this')}"
 
+    def groupingsets_sql(self, expression: exp.GroupingSets) -> str:
+        grouping_sets = self.expressions(expression, indent=False)
+        return f"GROUPING SETS {self.wrap(grouping_sets)}"
+
+    def rollup_sql(self, expression: exp.Rollup) -> str:
+        expressions = self.expressions(expression, indent=False)
+        return f"ROLLUP {self.wrap(expressions)}" if expressions else "WITH ROLLUP"
+
+    def cube_sql(self, expression: exp.Cube) -> str:
+        expressions = self.expressions(expression, indent=False)
+        return f"CUBE {self.wrap(expressions)}" if expressions else "WITH CUBE"
+
     def group_sql(self, expression: exp.Group) -> str:
         group_by_all = expression.args.get("all")
         if group_by_all is True:
@@ -1954,34 +2028,23 @@ class Generator(metaclass=_Generator):
 
         group_by = self.op_expressions(f"GROUP BY{modifier}", expression)
 
-        grouping_sets = self.expressions(expression, key="grouping_sets", indent=False)
-        grouping_sets = (
-            f"{self.seg('GROUPING SETS')} {self.wrap(grouping_sets)}" if grouping_sets else ""
-        )
-
-        cube = expression.args.get("cube", [])
-        if seq_get(cube, 0) is True:
-            return f"{group_by}{self.seg('WITH CUBE')}"
-        else:
-            cube_sql = self.expressions(expression, key="cube", indent=False)
-            cube_sql = f"{self.seg('CUBE')} {self.wrap(cube_sql)}" if cube_sql else ""
-
-        rollup = expression.args.get("rollup", [])
-        if seq_get(rollup, 0) is True:
-            return f"{group_by}{self.seg('WITH ROLLUP')}"
-        else:
-            rollup_sql = self.expressions(expression, key="rollup", indent=False)
-            rollup_sql = f"{self.seg('ROLLUP')} {self.wrap(rollup_sql)}" if rollup_sql else ""
+        grouping_sets = self.expressions(expression, key="grouping_sets")
+        cube = self.expressions(expression, key="cube")
+        rollup = self.expressions(expression, key="rollup")
 
         groupings = csv(
-            grouping_sets,
-            cube_sql,
-            rollup_sql,
+            self.seg(grouping_sets) if grouping_sets else "",
+            self.seg(cube) if cube else "",
+            self.seg(rollup) if rollup else "",
             self.seg("WITH TOTALS") if expression.args.get("totals") else "",
             sep=self.GROUPINGS_SEP,
         )
 
-        if expression.args.get("expressions") and groupings:
+        if (
+            expression.expressions
+            and groupings
+            and groupings.strip() not in ("WITH CUBE", "WITH ROLLUP")
+        ):
             group_by = f"{group_by}{self.GROUPINGS_SEP}"
 
         return f"{group_by}{groupings}"
@@ -2443,6 +2506,13 @@ class Generator(metaclass=_Generator):
     def subquery_sql(self, expression: exp.Subquery, sep: str = " AS ") -> str:
         alias = self.sql(expression, "alias")
         alias = f"{sep}{alias}" if alias else ""
+        sample = self.sql(expression, "sample")
+        if self.dialect.ALIAS_POST_TABLESAMPLE and sample:
+            alias = f"{sample}{alias}"
+
+            # Set to None so it's not generated again by self.query_modifiers()
+            expression.set("sample", None)
+
         pivots = self.expressions(expression, key="pivots", sep="", flat=True)
         sql = self.query_modifiers(expression, self.wrap(expression), alias, pivots)
         return self.prepend_ctes(expression, sql)
@@ -2450,52 +2520,6 @@ class Generator(metaclass=_Generator):
     def qualify_sql(self, expression: exp.Qualify) -> str:
         this = self.indent(self.sql(expression, "this"))
         return f"{self.seg('QUALIFY')}{self.sep()}{this}"
-
-    def set_operations(self, expression: exp.SetOperation) -> str:
-        if not self.SET_OP_MODIFIERS:
-            limit = expression.args.get("limit")
-            order = expression.args.get("order")
-
-            if limit or order:
-                select = exp.subquery(expression, "_l_0", copy=False).select("*", copy=False)
-
-                if limit:
-                    select = select.limit(limit.pop(), copy=False)
-                if order:
-                    select = select.order_by(order.pop(), copy=False)
-                return self.sql(select)
-
-        sqls: t.List[str] = []
-        stack: t.List[t.Union[str, exp.Expression]] = [expression]
-
-        while stack:
-            node = stack.pop()
-
-            if isinstance(node, exp.SetOperation):
-                stack.append(node.expression)
-                stack.append(
-                    self.maybe_comment(
-                        getattr(self, f"{node.key}_op")(node),
-                        comments=node.comments,
-                        separated=True,
-                    )
-                )
-                stack.append(node.this)
-            else:
-                sqls.append(self.sql(node))
-
-        this = self.sep().join(sqls)
-        this = self.query_modifiers(expression, this)
-        return self.prepend_ctes(expression, this)
-
-    def union_sql(self, expression: exp.Union) -> str:
-        return self.set_operations(expression)
-
-    def union_op(self, expression: exp.SetOperation) -> str:
-        kind = " DISTINCT" if self.EXPLICIT_SET_OP else ""
-        kind = kind if expression.args.get("distinct") else " ALL"
-        by_name = " BY NAME" if expression.args.get("by_name") else ""
-        return f"UNION{kind}{by_name}"
 
     def unnest_sql(self, expression: exp.Unnest) -> str:
         args = self.expressions(expression, flat=True)
@@ -2888,7 +2912,12 @@ class Generator(metaclass=_Generator):
         return f"REFERENCES {this}{expressions}{options}"
 
     def anonymous_sql(self, expression: exp.Anonymous) -> str:
-        return self.func(self.sql(expression, "this"), *expression.expressions)
+        # We don't normalize qualified functions such as a.b.foo(), because they can be case-sensitive
+        parent = expression.parent
+        is_qualified = isinstance(parent, exp.Dot) and expression is parent.expression
+        return self.func(
+            self.sql(expression, "this"), *expression.expressions, normalize=not is_qualified
+        )
 
     def paren_sql(self, expression: exp.Paren) -> str:
         sql = self.seg(self.indent(self.sql(expression, "this")), sep="")
@@ -3397,8 +3426,10 @@ class Generator(metaclass=_Generator):
         *args: t.Optional[exp.Expression | str],
         prefix: str = "(",
         suffix: str = ")",
+        normalize: bool = True,
     ) -> str:
-        return f"{self.normalize_func(name)}{prefix}{self.format_args(*args)}{suffix}"
+        name = self.normalize_func(name) if normalize else name
+        return f"{name}{prefix}{self.format_args(*args)}{suffix}"
 
     def format_args(self, *args: t.Optional[str | exp.Expression]) -> str:
         arg_sqls = tuple(
@@ -3472,6 +3503,7 @@ class Generator(metaclass=_Generator):
             result_sql = "\n".join(s.rstrip() for s in result_sqls)
         else:
             result_sql = "".join(result_sqls)
+
         return (
             self.indent(result_sql, skip_first=skip_first, skip_last=skip_last)
             if indent
@@ -3586,6 +3618,19 @@ class Generator(metaclass=_Generator):
 
     def dictsubproperty_sql(self, expression: exp.DictSubProperty) -> str:
         return f"{self.sql(expression, 'this')} {self.sql(expression, 'value')}"
+
+    def duplicatekeyproperty_sql(self, expression: exp.DuplicateKeyProperty) -> str:
+        return f"DUPLICATE KEY ({self.expressions(expression, flat=True)})"
+
+    # https://docs.starrocks.io/docs/sql-reference/sql-statements/data-definition/CREATE_TABLE/#distribution_desc
+    def distributedbyproperty_sql(self, expression: exp.DistributedByProperty) -> str:
+        expressions = self.expressions(expression, flat=True)
+        expressions = f" {self.wrap(expressions)}" if expressions else ""
+        buckets = self.sql(expression, "buckets")
+        kind = self.sql(expression, "kind")
+        buckets = f" BUCKETS {buckets}" if buckets else ""
+        order = self.sql(expression, "order")
+        return f"DISTRIBUTED BY {kind}{expressions}{buckets}{order}"
 
     def oncluster_sql(self, expression: exp.OnCluster) -> str:
         return ""
@@ -4136,3 +4181,101 @@ class Generator(metaclass=_Generator):
         expr = exp.AtTimeZone(this=timestamp, zone=target_tz)
 
         return self.sql(expr)
+
+    def json_sql(self, expression: exp.JSON) -> str:
+        this = self.sql(expression, "this")
+        this = f" {this}" if this else ""
+
+        _with = expression.args.get("with")
+
+        if _with is None:
+            with_sql = ""
+        elif not _with:
+            with_sql = " WITHOUT"
+        else:
+            with_sql = " WITH"
+
+        unique_sql = " UNIQUE KEYS" if expression.args.get("unique") else ""
+
+        return f"JSON{this}{with_sql}{unique_sql}"
+
+    def jsonvalue_sql(self, expression: exp.JSONValue) -> str:
+        def _generate_on_options(arg: t.Any) -> str:
+            return arg if isinstance(arg, str) else f"DEFAULT {self.sql(arg)}"
+
+        path = self.sql(expression, "path")
+        returning = self.sql(expression, "returning")
+        returning = f" RETURNING {returning}" if returning else ""
+
+        on_condition = self.sql(expression, "on_condition")
+        on_condition = f" {on_condition}" if on_condition else ""
+
+        return self.func("JSON_VALUE", expression.this, f"{path}{returning}{on_condition}")
+
+    def conditionalinsert_sql(self, expression: exp.ConditionalInsert) -> str:
+        else_ = "ELSE " if expression.args.get("else_") else ""
+        condition = self.sql(expression, "expression")
+        condition = f"WHEN {condition} THEN " if condition else else_
+        insert = self.sql(expression, "this")[len("INSERT") :].strip()
+        return f"{condition}{insert}"
+
+    def multitableinserts_sql(self, expression: exp.MultitableInserts) -> str:
+        kind = self.sql(expression, "kind")
+        expressions = self.seg(self.expressions(expression, sep=" "))
+        res = f"INSERT {kind}{expressions}{self.seg(self.sql(expression, 'source'))}"
+        return res
+
+    def oncondition_sql(self, expression: exp.OnCondition) -> str:
+        # Static options like "NULL ON ERROR" are stored as strings, in contrast to "DEFAULT <expr> ON ERROR"
+        empty = expression.args.get("empty")
+        empty = (
+            f"DEFAULT {empty} ON EMPTY"
+            if isinstance(empty, exp.Expression)
+            else self.sql(expression, "empty")
+        )
+
+        error = expression.args.get("error")
+        error = (
+            f"DEFAULT {error} ON ERROR"
+            if isinstance(error, exp.Expression)
+            else self.sql(expression, "error")
+        )
+
+        if error and empty:
+            error = (
+                f"{empty} {error}"
+                if self.dialect.ON_CONDITION_EMPTY_BEFORE_ERROR
+                else f"{error} {empty}"
+            )
+            empty = ""
+
+        null = self.sql(expression, "null")
+
+        return f"{empty}{error}{null}"
+
+    def jsonexists_sql(self, expression: exp.JSONExists) -> str:
+        this = self.sql(expression, "this")
+        path = self.sql(expression, "path")
+
+        passing = self.expressions(expression, "passing")
+        passing = f" PASSING {passing}" if passing else ""
+
+        on_condition = self.sql(expression, "on_condition")
+        on_condition = f" {on_condition}" if on_condition else ""
+
+        path = f"{path}{passing}{on_condition}"
+
+        return self.func("JSON_EXISTS", this, path)
+
+    def arrayagg_sql(self, expression: exp.ArrayAgg) -> str:
+        array_agg = self.function_fallback_sql(expression)
+
+        if self.dialect.ARRAY_AGG_INCLUDES_NULLS and expression.args.get("nulls_excluded"):
+            parent = expression.parent
+            if isinstance(parent, exp.Filter):
+                parent_cond = parent.expression.this
+                parent_cond.replace(parent_cond.and_(expression.this.is_(exp.null()).not_()))
+            else:
+                array_agg = f"{array_agg} FILTER(WHERE {self.sql(expression, 'this')} IS NOT NULL)"
+
+        return array_agg

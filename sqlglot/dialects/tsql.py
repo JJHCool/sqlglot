@@ -21,6 +21,7 @@ from sqlglot.dialects.dialect import (
     timestrtotime_sql,
 )
 from sqlglot.helper import seq_get
+from sqlglot.parser import build_coalesce
 from sqlglot.time import format_time
 from sqlglot.tokens import TokenType
 
@@ -351,12 +352,13 @@ def _timestrtotime_sql(self: TSQL.Generator, expression: exp.TimeStrToTime):
 
 
 class TSQL(Dialect):
-    NORMALIZATION_STRATEGY = NormalizationStrategy.CASE_INSENSITIVE
-    TIME_FORMAT = "'yyyy-mm-dd hh:mm:ss'"
     SUPPORTS_SEMI_ANTI_JOIN = False
     LOG_BASE_FIRST = False
     TYPED_DIVISION = True
     CONCAT_COALESCE = True
+    NORMALIZATION_STRATEGY = NormalizationStrategy.CASE_INSENSITIVE
+
+    TIME_FORMAT = "'yyyy-mm-dd hh:mm:ss'"
 
     TIME_MAPPING = {
         "year": "%Y",
@@ -395,7 +397,7 @@ class TSQL(Dialect):
         "HH": "%H",
         "H": "%-H",
         "h": "%-I",
-        "S": "%f",
+        "ffffff": "%f",
         "yyyy": "%Y",
         "yy": "%y",
     }
@@ -520,6 +522,12 @@ class TSQL(Dialect):
                 substr=seq_get(args, 0),
                 position=seq_get(args, 2),
             ),
+            "COUNT": lambda args: exp.Count(
+                this=seq_get(args, 0), expressions=args[1:], big_int=False
+            ),
+            "COUNT_BIG": lambda args: exp.Count(
+                this=seq_get(args, 0), expressions=args[1:], big_int=True
+            ),
             "DATEADD": build_date_delta(exp.DateAdd, unit_mapping=DATE_DELTA_INTERVAL),
             "DATEDIFF": _build_date_delta(exp.DateDiff, unit_mapping=DATE_DELTA_INTERVAL),
             "DATENAME": _build_formatted_time(exp.TimeToStr, full_format_mapping=True),
@@ -529,7 +537,7 @@ class TSQL(Dialect):
             "FORMAT": _build_format,
             "GETDATE": exp.CurrentTimestamp.from_arg_list,
             "HASHBYTES": _build_hashbytes,
-            "ISNULL": exp.Coalesce.from_arg_list,
+            "ISNULL": build_coalesce,
             "JSON_QUERY": _build_json_query,
             "JSON_VALUE": parser.build_extract_json_with_path(exp.JSONExtractScalar),
             "LEN": _build_with_arg_as_text(exp.Length),
@@ -808,6 +816,7 @@ class TSQL(Dialect):
         SET_OP_MODIFIERS = False
         COPY_PARAMS_EQ_REQUIRED = True
         PARSE_JSON_NAME = None
+        EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE = False
 
         EXPRESSIONS_WITHOUT_NESTED_CTES = {
             exp.Create,
@@ -983,7 +992,9 @@ class TSQL(Dialect):
             return super().setitem_sql(expression)
 
         def boolean_sql(self, expression: exp.Boolean) -> str:
-            if type(expression.parent) in BIT_TYPES:
+            if type(expression.parent) in BIT_TYPES or isinstance(
+                expression.find_ancestor(exp.Values, exp.Select), exp.Values
+            ):
                 return "1" if expression.this else "0"
 
             return "(1 = 1)" if expression.this else "(1 = 0)"
@@ -1061,6 +1072,10 @@ class TSQL(Dialect):
                 sql = sql.replace("CREATE OR REPLACE ", "CREATE OR ALTER ", 1)
 
             return self.prepend_ctes(expression, sql)
+
+        def count_sql(self, expression: exp.Count) -> str:
+            func_name = "COUNT_BIG" if expression.args.get("big_int") else "COUNT"
+            return rename_func(func_name)(self, expression)
 
         def offset_sql(self, expression: exp.Offset) -> str:
             return f"{super().offset_sql(expression)} ROWS"

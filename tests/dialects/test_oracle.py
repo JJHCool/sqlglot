@@ -99,6 +99,13 @@ class TestOracle(Validator):
         )
 
         self.validate_all(
+            "TRUNC(SYSDATE, 'YEAR')",
+            write={
+                "clickhouse": "DATE_TRUNC('YEAR', CURRENT_TIMESTAMP())",
+                "oracle": "TRUNC(SYSDATE, 'YEAR')",
+            },
+        )
+        self.validate_all(
             "SELECT * FROM test WHERE MOD(col1, 4) = 3",
             read={
                 "duckdb": "SELECT * FROM test WHERE col1 % 4 = 3",
@@ -262,17 +269,24 @@ class TestOracle(Validator):
         self.validate_all(
             "LTRIM('Hello World', 'H')",
             write={
-                "oracle": "TRIM(LEADING 'H' FROM 'Hello World')",
-                "clickhouse": "TRIM(LEADING 'H' FROM 'Hello World')",
                 "": "LTRIM('Hello World', 'H')",
+                "oracle": "LTRIM('Hello World', 'H')",
+                "clickhouse": "TRIM(LEADING 'H' FROM 'Hello World')",
             },
         )
         self.validate_all(
             "RTRIM('Hello World', 'd')",
             write={
-                "oracle": "TRIM(TRAILING 'd' FROM 'Hello World')",
-                "clickhouse": "TRIM(TRAILING 'd' FROM 'Hello World')",
                 "": "RTRIM('Hello World', 'd')",
+                "oracle": "RTRIM('Hello World', 'd')",
+                "clickhouse": "TRIM(TRAILING 'd' FROM 'Hello World')",
+            },
+        )
+        self.validate_all(
+            "TRIM(BOTH 'h' FROM 'Hello World')",
+            write={
+                "oracle": "TRIM(BOTH 'h' FROM 'Hello World')",
+                "clickhouse": "TRIM(BOTH 'h' FROM 'Hello World')",
             },
         )
 
@@ -362,7 +376,7 @@ FROM warehouses, XMLTABLE(
 FROM XMLTABLE(
   'ROWSET/ROW'
   PASSING
-    dbms_xmlgen.GETXMLTYPE('SELECT table_name, column_name, data_default FROM user_tab_columns')
+    dbms_xmlgen.getxmltype('SELECT table_name, column_name, data_default FROM user_tab_columns')
   COLUMNS
     table_name VARCHAR2(128) PATH '*[1]',
     column_name VARCHAR2(128) PATH '*[2]',
@@ -454,3 +468,93 @@ WHERE
                     self.validate_identity(
                         f"CREATE VIEW view AS SELECT * FROM tbl WITH {restriction}{constraint_name}"
                     )
+
+    def test_multitable_inserts(self):
+        self.maxDiff = None
+        self.validate_identity(
+            "INSERT ALL "
+            "INTO dest_tab1 (id, description) VALUES (id, description) "
+            "INTO dest_tab2 (id, description) VALUES (id, description) "
+            "INTO dest_tab3 (id, description) VALUES (id, description) "
+            "SELECT id, description FROM source_tab"
+        )
+
+        self.validate_identity(
+            "INSERT ALL "
+            "INTO pivot_dest (id, day, val) VALUES (id, 'mon', mon_val) "
+            "INTO pivot_dest (id, day, val) VALUES (id, 'tue', tue_val) "
+            "INTO pivot_dest (id, day, val) VALUES (id, 'wed', wed_val) "
+            "INTO pivot_dest (id, day, val) VALUES (id, 'thu', thu_val) "
+            "INTO pivot_dest (id, day, val) VALUES (id, 'fri', fri_val) "
+            "SELECT * "
+            "FROM pivot_source"
+        )
+
+        self.validate_identity(
+            "INSERT ALL "
+            "WHEN id <= 3 THEN "
+            "INTO dest_tab1 (id, description) VALUES (id, description) "
+            "WHEN id BETWEEN 4 AND 7 THEN "
+            "INTO dest_tab2 (id, description) VALUES (id, description) "
+            "WHEN id >= 8 THEN "
+            "INTO dest_tab3 (id, description) VALUES (id, description) "
+            "SELECT id, description "
+            "FROM source_tab"
+        )
+
+        self.validate_identity(
+            "INSERT ALL "
+            "WHEN id <= 3 THEN "
+            "INTO dest_tab1 (id, description) VALUES (id, description) "
+            "WHEN id BETWEEN 4 AND 7 THEN "
+            "INTO dest_tab2 (id, description) VALUES (id, description) "
+            "WHEN 1 = 1 THEN "
+            "INTO dest_tab3 (id, description) VALUES (id, description) "
+            "SELECT id, description "
+            "FROM source_tab"
+        )
+
+        self.validate_identity(
+            "INSERT FIRST "
+            "WHEN id <= 3 THEN "
+            "INTO dest_tab1 (id, description) VALUES (id, description) "
+            "WHEN id <= 5 THEN "
+            "INTO dest_tab2 (id, description) VALUES (id, description) "
+            "ELSE "
+            "INTO dest_tab3 (id, description) VALUES (id, description) "
+            "SELECT id, description "
+            "FROM source_tab"
+        )
+
+        self.validate_identity(
+            "INSERT FIRST "
+            "WHEN id <= 3 THEN "
+            "INTO dest_tab1 (id, description) VALUES (id, description) "
+            "ELSE "
+            "INTO dest_tab2 (id, description) VALUES (id, description) "
+            "INTO dest_tab3 (id, description) VALUES (id, description) "
+            "SELECT id, description "
+            "FROM source_tab"
+        )
+
+        self.validate_identity(
+            "/* COMMENT */ INSERT FIRST "
+            "WHEN salary > 4000 THEN INTO emp2 "
+            "WHEN salary > 5000 THEN INTO emp3 "
+            "WHEN salary > 6000 THEN INTO emp4 "
+            "SELECT salary FROM employees"
+        )
+
+    def test_json_functions(self):
+        for format_json in ("", " FORMAT JSON"):
+            for on_cond in (
+                "",
+                " TRUE ON ERROR",
+                " NULL ON EMPTY",
+                " DEFAULT 1 ON ERROR TRUE ON EMPTY",
+            ):
+                for passing in ("", " PASSING 'name1' AS \"var1\", 'name2' AS \"var2\""):
+                    with self.subTest("Testing JSON_EXISTS()"):
+                        self.validate_identity(
+                            f"SELECT * FROM t WHERE JSON_EXISTS(name{format_json}, '$[1].middle'{passing}{on_cond})"
+                        )

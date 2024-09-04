@@ -93,7 +93,9 @@ def _build_date_time_add(expr_type: t.Type[E]) -> t.Callable[[t.List], E]:
 
 # https://docs.snowflake.com/en/sql-reference/functions/div0
 def _build_if_from_div0(args: t.List) -> exp.If:
-    cond = exp.EQ(this=seq_get(args, 1), expression=exp.Literal.number(0))
+    cond = exp.EQ(this=seq_get(args, 1), expression=exp.Literal.number(0)).and_(
+        exp.Is(this=seq_get(args, 0), expression=exp.null()).not_()
+    )
     true = exp.Literal.number(0)
     false = exp.Div(this=seq_get(args, 0), expression=seq_get(args, 1))
     return exp.If(this=cond, true=true, false=false)
@@ -231,6 +233,7 @@ class Snowflake(Dialect):
     PREFER_CTE_ALIAS_COLUMN = True
     TABLESAMPLE_SIZE_IS_PERCENT = True
     COPY_PARAMS_ARE_CSV = False
+    ARRAY_AGG_INCLUDES_NULLS = None
 
     TIME_MAPPING = {
         "YYYY": "%Y",
@@ -289,7 +292,6 @@ class Snowflake(Dialect):
         FUNCTIONS = {
             **parser.Parser.FUNCTIONS,
             "APPROX_PERCENTILE": exp.ApproxQuantile.from_arg_list,
-            "ARRAYAGG": exp.ArrayAgg.from_arg_list,
             "ARRAY_CONSTRUCT": lambda args: exp.Array(expressions=args),
             "ARRAY_CONTAINS": lambda args: exp.ArrayContains(
                 this=seq_get(args, 1), expression=seq_get(args, 0)
@@ -325,7 +327,14 @@ class Snowflake(Dialect):
             "NULLIFZERO": _build_if_from_nullifzero,
             "OBJECT_CONSTRUCT": _build_object_construct,
             "REGEXP_REPLACE": _build_regexp_replace,
-            "REGEXP_SUBSTR": exp.RegexpExtract.from_arg_list,
+            "REGEXP_SUBSTR": lambda args: exp.RegexpExtract(
+                this=seq_get(args, 0),
+                expression=seq_get(args, 1),
+                position=seq_get(args, 2),
+                occurrence=seq_get(args, 3),
+                parameters=seq_get(args, 4),
+                group=seq_get(args, 5) or exp.Literal.number(0),
+            ),
             "RLIKE": exp.RegexpLike.from_arg_list,
             "SQUARE": lambda args: exp.Pow(this=seq_get(args, 0), expression=exp.Literal.number(2)),
             "TIMEADD": _build_date_time_add(exp.TimeAdd),
@@ -750,6 +759,7 @@ class Snowflake(Dialect):
         SUPPORTS_EXPLODING_PROJECTIONS = False
         ARRAY_CONCAT_IS_VAR_LEN = False
         SUPPORTS_CONVERT_TIMEZONE = True
+        EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE = False
 
         TRANSFORMS = {
             **generator.Generator.TRANSFORMS,
@@ -907,6 +917,14 @@ class Snowflake(Dialect):
 
             return rename_func("TIMESTAMP_FROM_PARTS")(self, expression)
 
+        def cast_sql(self, expression: exp.Cast, safe_prefix: t.Optional[str] = None) -> str:
+            if expression.is_type(exp.DataType.Type.GEOGRAPHY):
+                return self.func("TO_GEOGRAPHY", expression.this)
+            if expression.is_type(exp.DataType.Type.GEOMETRY):
+                return self.func("TO_GEOMETRY", expression.this)
+
+            return super().cast_sql(expression, safe_prefix=safe_prefix)
+
         def trycast_sql(self, expression: exp.TryCast) -> str:
             value = expression.this
 
@@ -980,6 +998,12 @@ class Snowflake(Dialect):
             # Other dialects don't support all of the following parameters, so we need to
             # generate default values as necessary to ensure the transpilation is correct
             group = expression.args.get("group")
+
+            # To avoid generating all these default values, we set group to None if
+            # it's 0 (also default value) which doesn't trigger the following chain
+            if group and group.name == "0":
+                group = None
+
             parameters = expression.args.get("parameters") or (group and exp.Literal.string("c"))
             occurrence = expression.args.get("occurrence") or (parameters and exp.Literal.number(1))
             position = expression.args.get("position") or (occurrence and exp.Literal.number(1))
@@ -993,16 +1017,6 @@ class Snowflake(Dialect):
                 parameters,
                 group,
             )
-
-        def except_op(self, expression: exp.Except) -> str:
-            if not expression.args.get("distinct"):
-                self.unsupported("EXCEPT with All is not supported in Snowflake")
-            return super().except_op(expression)
-
-        def intersect_op(self, expression: exp.Intersect) -> str:
-            if not expression.args.get("distinct"):
-                self.unsupported("INTERSECT with All is not supported in Snowflake")
-            return super().intersect_op(expression)
 
         def describe_sql(self, expression: exp.Describe) -> str:
             # Default to table if kind is unknown

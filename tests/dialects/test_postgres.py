@@ -788,6 +788,13 @@ class TestPostgres(Validator):
             },
         )
 
+        self.validate_identity(
+            'SELECT js, js IS JSON AS "json?", js IS JSON VALUE AS "scalar?", js IS JSON SCALAR AS "scalar?", js IS JSON OBJECT AS "object?", js IS JSON ARRAY AS "array?" FROM t'
+        )
+        self.validate_identity(
+            'SELECT js, js IS JSON ARRAY WITH UNIQUE KEYS AS "array w. UK?", js IS JSON ARRAY WITHOUT UNIQUE KEYS AS "array w/o UK?", js IS JSON ARRAY UNIQUE KEYS AS "array w UK 2?" FROM t'
+        )
+
     def test_ddl(self):
         # Checks that user-defined types are parsed into DataType instead of Identifier
         self.parse_one("CREATE TABLE t (a udt)").this.expressions[0].args["kind"].assert_is(
@@ -1016,6 +1023,10 @@ class TestPostgres(Validator):
         self.validate_identity(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_table_id ON tbl USING btree(id)"
         )
+        self.validate_identity("DROP INDEX ix_table_id")
+        self.validate_identity("DROP INDEX IF EXISTS ix_table_id")
+        self.validate_identity("DROP INDEX CONCURRENTLY ix_table_id")
+        self.validate_identity("DROP INDEX CONCURRENTLY IF EXISTS ix_table_id")
 
         self.validate_identity(
             """

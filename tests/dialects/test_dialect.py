@@ -656,13 +656,29 @@ class TestDialect(Validator):
             },
         )
         self.validate_all(
+            "TIME_STR_TO_TIME('2020-01-01 12:13:14.123456+00:00')",
+            write={
+                "mysql": "CAST('2020-01-01 12:13:14.123456+00:00' AS DATETIME(6))",
+                "trino": "CAST('2020-01-01 12:13:14.123456+00:00' AS TIMESTAMP(6))",
+                "presto": "CAST('2020-01-01 12:13:14.123456+00:00' AS TIMESTAMP)",
+            },
+        )
+        self.validate_all(
+            "TIME_STR_TO_TIME('2020-01-01 12:13:14.123-08:00', 'America/Los_Angeles')",
+            write={
+                "mysql": "TIMESTAMP('2020-01-01 12:13:14.123-08:00')",
+                "trino": "CAST('2020-01-01 12:13:14.123-08:00' AS TIMESTAMP(3) WITH TIME ZONE)",
+                "presto": "CAST('2020-01-01 12:13:14.123-08:00' AS TIMESTAMP WITH TIME ZONE)",
+            },
+        )
+        self.validate_all(
             "TIME_STR_TO_TIME('2020-01-01 12:13:14-08:00', 'America/Los_Angeles')",
             write={
                 "bigquery": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMP)",
                 "databricks": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMP)",
                 "duckdb": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMPTZ)",
                 "tsql": "CAST('2020-01-01 12:13:14-08:00' AS DATETIMEOFFSET) AT TIME ZONE 'UTC'",
-                "mysql": "CAST('2020-01-01 12:13:14-08:00' AS DATETIME)",
+                "mysql": "TIMESTAMP('2020-01-01 12:13:14-08:00')",
                 "postgres": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMPTZ)",
                 "redshift": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMP WITH TIME ZONE)",
                 "snowflake": "CAST('2020-01-01 12:13:14-08:00' AS TIMESTAMPTZ)",
@@ -683,7 +699,7 @@ class TestDialect(Validator):
                 "databricks": "CAST(col AS TIMESTAMP)",
                 "duckdb": "CAST(col AS TIMESTAMPTZ)",
                 "tsql": "CAST(col AS DATETIMEOFFSET) AT TIME ZONE 'UTC'",
-                "mysql": "CAST(col AS DATETIME)",
+                "mysql": "TIMESTAMP(col)",
                 "postgres": "CAST(col AS TIMESTAMPTZ)",
                 "redshift": "CAST(col AS TIMESTAMP WITH TIME ZONE)",
                 "snowflake": "CAST(col AS TIMESTAMPTZ)",
@@ -720,6 +736,13 @@ class TestDialect(Validator):
                 "presto": "DATE_FORMAT(x, '%Y-%m-%d')",
                 "redshift": "TO_CHAR(x, 'YYYY-MM-DD')",
                 "doris": "DATE_FORMAT(x, '%Y-%m-%d')",
+            },
+        )
+        self.validate_all(
+            "TIME_TO_STR(a, '%Y-%m-%d %H:%M:%S.%f')",
+            write={
+                "redshift": "TO_CHAR(a, 'YYYY-MM-DD HH24:MI:SS.US')",
+                "tsql": "FORMAT(a, 'yyyy-MM-dd HH:mm:ss.ffffff')",
             },
         )
         self.validate_all(
@@ -1385,6 +1408,13 @@ class TestDialect(Validator):
             },
         )
 
+        for dialect in ("duckdb", "starrocks"):
+            with self.subTest(f"Generating json extraction with digit-prefixed key ({dialect})"):
+                self.assertEqual(
+                    parse_one("""select '{"0": "v"}' -> '0'""", read=dialect).sql(dialect=dialect),
+                    """SELECT '{"0": "v"}' -> '0'""",
+                )
+
     def test_cross_join(self):
         self.validate_all(
             "SELECT a FROM x CROSS JOIN UNNEST(y) AS t (a)",
@@ -1399,7 +1429,7 @@ class TestDialect(Validator):
             write={
                 "drill": "SELECT a, b FROM x CROSS JOIN UNNEST(y, z) AS t(a, b)",
                 "presto": "SELECT a, b FROM x CROSS JOIN UNNEST(y, z) AS t(a, b)",
-                "spark": "SELECT a, b FROM x LATERAL VIEW EXPLODE(y) t AS a LATERAL VIEW EXPLODE(z) t AS b",
+                "spark": "SELECT a, b FROM x LATERAL VIEW INLINE(ARRAYS_ZIP(y, z)) t AS a, b",
             },
         )
         self.validate_all(
@@ -1465,12 +1495,14 @@ class TestDialect(Validator):
             "SELECT * FROM a INTERSECT SELECT * FROM b",
             read={
                 "bigquery": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "presto": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "spark": "SELECT * FROM a INTERSECT SELECT * FROM b",
             },
             write={
                 "bigquery": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "presto": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "spark": "SELECT * FROM a INTERSECT SELECT * FROM b",
@@ -1480,12 +1512,14 @@ class TestDialect(Validator):
             "SELECT * FROM a EXCEPT SELECT * FROM b",
             read={
                 "bigquery": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "presto": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "spark": "SELECT * FROM a EXCEPT SELECT * FROM b",
             },
             write={
                 "bigquery": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "presto": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "spark": "SELECT * FROM a EXCEPT SELECT * FROM b",
@@ -1504,6 +1538,7 @@ class TestDialect(Validator):
             "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
             write={
                 "bigquery": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a INTERSECT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "presto": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "spark": "SELECT * FROM a INTERSECT SELECT * FROM b",
@@ -1513,6 +1548,7 @@ class TestDialect(Validator):
             "SELECT * FROM a INTERSECT ALL SELECT * FROM b",
             write={
                 "bigquery": "SELECT * FROM a INTERSECT ALL SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a INTERSECT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a INTERSECT ALL SELECT * FROM b",
                 "presto": "SELECT * FROM a INTERSECT ALL SELECT * FROM b",
                 "spark": "SELECT * FROM a INTERSECT ALL SELECT * FROM b",
@@ -1522,6 +1558,7 @@ class TestDialect(Validator):
             "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
             write={
                 "bigquery": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a EXCEPT DISTINCT SELECT * FROM b",
                 "duckdb": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "presto": "SELECT * FROM a EXCEPT SELECT * FROM b",
                 "spark": "SELECT * FROM a EXCEPT SELECT * FROM b",
@@ -1531,6 +1568,7 @@ class TestDialect(Validator):
             "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
             read={
                 "bigquery": "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
+                "clickhouse": "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
                 "duckdb": "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
                 "presto": "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
                 "spark": "SELECT * FROM a EXCEPT ALL SELECT * FROM b",
@@ -2331,7 +2369,7 @@ SELECT
                 "mysql": "SELECT * FROM (SELECT *, COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
                 "oracle": "SELECT * FROM (SELECT *, COUNT(*) OVER () AS _w FROM t) _t WHERE _w > 1",
                 "postgres": "SELECT * FROM (SELECT *, COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
-                "tsql": "SELECT * FROM (SELECT *, COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
+                "tsql": "SELECT * FROM (SELECT *, COUNT_BIG(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
             },
         )
         self.validate_all(
@@ -2343,7 +2381,7 @@ SELECT
                 "mysql": "SELECT `user id`, some_id, other_id, `2 nd id` FROM (SELECT `user id`, some_id, 1 AS other_id, 2 AS `2 nd id`, COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
                 "oracle": 'SELECT "user id", some_id, other_id, "2 nd id" FROM (SELECT "user id", some_id, 1 AS other_id, 2 AS "2 nd id", COUNT(*) OVER () AS _w FROM t) _t WHERE _w > 1',
                 "postgres": 'SELECT "user id", some_id, other_id, "2 nd id" FROM (SELECT "user id", some_id, 1 AS other_id, 2 AS "2 nd id", COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1',
-                "tsql": "SELECT [user id], some_id, other_id, [2 nd id] FROM (SELECT [user id] AS [user id], some_id AS some_id, 1 AS other_id, 2 AS [2 nd id], COUNT(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
+                "tsql": "SELECT [user id], some_id, other_id, [2 nd id] FROM (SELECT [user id] AS [user id], some_id AS some_id, 1 AS other_id, 2 AS [2 nd id], COUNT_BIG(*) OVER () AS _w FROM t) AS _t WHERE _w > 1",
             },
         )
 
@@ -2699,3 +2737,68 @@ FROM subquery2""",
                 "tsql": "WITH _generated_dates(date_week) AS (SELECT CAST('2020-01-01' AS DATE) AS date_week UNION ALL SELECT CAST(DATEADD(WEEK, 1, date_week) AS DATE) FROM _generated_dates WHERE CAST(DATEADD(WEEK, 1, date_week) AS DATE) <= CAST('2020-02-01' AS DATE)) SELECT * FROM (SELECT date_week AS date_week FROM _generated_dates) AS _generated_dates",
             },
         )
+
+    def test_set_operation_specifiers(self):
+        self.validate_all(
+            "SELECT 1 EXCEPT ALL SELECT 1",
+            write={
+                "": "SELECT 1 EXCEPT ALL SELECT 1",
+                "bigquery": UnsupportedError,
+                "clickhouse": "SELECT 1 EXCEPT SELECT 1",
+                "databricks": "SELECT 1 EXCEPT ALL SELECT 1",
+                "duckdb": "SELECT 1 EXCEPT ALL SELECT 1",
+                "mysql": "SELECT 1 EXCEPT ALL SELECT 1",
+                "oracle": "SELECT 1 EXCEPT ALL SELECT 1",
+                "postgres": "SELECT 1 EXCEPT ALL SELECT 1",
+                "presto": UnsupportedError,
+                "redshift": UnsupportedError,
+                "snowflake": UnsupportedError,
+                "spark": "SELECT 1 EXCEPT ALL SELECT 1",
+                "sqlite": UnsupportedError,
+                "starrocks": UnsupportedError,
+                "trino": UnsupportedError,
+                "tsql": UnsupportedError,
+            },
+        )
+
+    def test_normalize(self):
+        for form in ("", ", nfkc"):
+            with self.subTest(f"Testing NORMALIZE('str'{form}) roundtrip"):
+                self.validate_all(
+                    f"SELECT NORMALIZE('str'{form})",
+                    read={
+                        "presto": f"SELECT NORMALIZE('str'{form})",
+                        "trino": f"SELECT NORMALIZE('str'{form})",
+                        "bigquery": f"SELECT NORMALIZE('str'{form})",
+                    },
+                    write={
+                        "presto": f"SELECT NORMALIZE('str'{form})",
+                        "trino": f"SELECT NORMALIZE('str'{form})",
+                        "bigquery": f"SELECT NORMALIZE('str'{form})",
+                    },
+                )
+
+        self.assertIsInstance(parse_one("NORMALIZE('str', NFD)").args.get("form"), exp.Var)
+
+    def test_coalesce(self):
+        """
+        Validate that "expressions" is a list for all the exp.Coalesce instances; This is important
+        as some optimizer rules are coalesce specific and will iterate on "expressions"
+        """
+
+        # Check the 2-arg aliases
+        for func in ("COALESCE", "IFNULL", "NVL"):
+            self.assertIsInstance(self.parse_one(f"{func}(1, 2)").expressions, list)
+
+        # Check the varlen case
+        coalesce = self.parse_one("COALESCE(x, y, z)")
+        self.assertIsInstance(coalesce.expressions, list)
+        self.assertIsNone(coalesce.args.get("is_nvl"))
+
+        # Check Oracle's NVL which is decoupled from COALESCE
+        oracle_nvl = parse_one("NVL(x, y)", read="oracle")
+        self.assertIsInstance(oracle_nvl.expressions, list)
+        self.assertTrue(oracle_nvl.args.get("is_nvl"))
+
+        # Check T-SQL's ISNULL which is parsed into exp.Coalesce
+        self.assertIsInstance(parse_one("ISNULL(x, y)", read="tsql").expressions, list)

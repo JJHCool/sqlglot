@@ -329,11 +329,20 @@ class TestPresto(Validator):
             },
         )
         self.validate_all(
-            "DAY_OF_WEEK(timestamp '2012-08-08 01:00:00')",
-            write={
+            "((DAY_OF_WEEK(CAST(TRY_CAST('2012-08-08 01:00:00' AS TIMESTAMP) AS DATE)) % 7) + 1)",
+            read={
                 "spark": "DAYOFWEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
+            },
+        )
+        self.validate_all(
+            "DAY_OF_WEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
+            read={
+                "duckdb": "ISODOW(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
+            },
+            write={
+                "spark": "((DAYOFWEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP)) % 7) + 1)",
                 "presto": "DAY_OF_WEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
-                "duckdb": "DAYOFWEEK(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
+                "duckdb": "ISODOW(CAST('2012-08-08 01:00:00' AS TIMESTAMP))",
             },
         )
 
@@ -522,6 +531,9 @@ class TestPresto(Validator):
             },
         )
 
+        self.validate_identity("""CREATE OR REPLACE VIEW v SECURITY DEFINER AS SELECT id FROM t""")
+        self.validate_identity("""CREATE OR REPLACE VIEW v SECURITY INVOKER AS SELECT id FROM t""")
+
     def test_quotes(self):
         self.validate_all(
             "''''",
@@ -634,6 +646,7 @@ class TestPresto(Validator):
                 },
             )
 
+        self.validate_identity("SELECT a FROM t GROUP BY a, ROLLUP (b), ROLLUP (c), ROLLUP (d)")
         self.validate_identity("SELECT a FROM test TABLESAMPLE BERNOULLI (50)")
         self.validate_identity("SELECT a FROM test TABLESAMPLE SYSTEM (75)")
         self.validate_identity("string_agg(x, ',')", "ARRAY_JOIN(ARRAY_AGG(x), ',')")
@@ -715,9 +728,6 @@ class TestPresto(Validator):
         )
         self.validate_all(
             "SELECT ROW(1, 2)",
-            read={
-                "spark": "SELECT STRUCT(1, 2)",
-            },
             write={
                 "presto": "SELECT ROW(1, 2)",
                 "spark": "SELECT STRUCT(1, 2)",
@@ -833,12 +843,6 @@ class TestPresto(Validator):
                 "presto": "ARRAY_AGG(x ORDER BY y DESC)",
                 "spark": "COLLECT_LIST(x)",
                 "trino": "ARRAY_AGG(x ORDER BY y DESC)",
-            },
-        )
-        self.validate_all(
-            "SELECT a FROM t GROUP BY a, ROLLUP(b), ROLLUP(c), ROLLUP(d)",
-            write={
-                "presto": "SELECT a FROM t GROUP BY a, ROLLUP (b, c, d)",
             },
         )
         self.validate_all(
@@ -1028,6 +1032,25 @@ class TestPresto(Validator):
             """SELECT JSON_FORMAT(JSON '[1, 2, 3]')""",
             write={
                 "spark": "SELECT REGEXP_EXTRACT(TO_JSON(FROM_JSON('[[1, 2, 3]]', SCHEMA_OF_JSON('[[1, 2, 3]]'))), '^.(.*).$', 1)",
+            },
+        )
+        self.validate_all(
+            "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+            read={
+                "presto": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "trino": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "duckdb": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "snowflake": "REGEXP_SUBSTR('abc', '(a)(b)(c)')",
+            },
+            write={
+                "presto": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "trino": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "duckdb": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "snowflake": "REGEXP_SUBSTR('abc', '(a)(b)(c)')",
+                "hive": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 0)",
+                "spark2": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 0)",
+                "spark": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 0)",
+                "databricks": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 0)",
             },
         )
 

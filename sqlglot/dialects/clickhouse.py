@@ -146,6 +146,12 @@ class ClickHouse(Dialect):
 
     CREATABLE_KIND_MAPPING = {"DATABASE": "SCHEMA"}
 
+    SET_OP_DISTINCT_BY_DEFAULT: t.Dict[t.Type[exp.Expression], t.Optional[bool]] = {
+        exp.Except: False,
+        exp.Intersect: False,
+        exp.Union: None,
+    }
+
     class Tokenizer(tokens.Tokenizer):
         COMMENTS = ["--", "#", "#!", ("/*", "*/")]
         IDENTIFIERS = ['"', "`"]
@@ -759,7 +765,6 @@ class ClickHouse(Dialect):
         SUPPORTS_TO_NUMBER = False
         JOIN_HINTS = False
         TABLE_HINTS = False
-        EXPLICIT_SET_OP = True
         GROUPINGS_SEP = ""
         SET_OP_MODIFIERS = False
         SUPPORTS_TABLE_ALIAS_COLUMNS = False
@@ -880,6 +885,13 @@ class ClickHouse(Dialect):
             exp.Variance: rename_func("varSamp"),
             exp.SchemaCommentProperty: lambda self, e: self.naked_property(e),
             exp.Stddev: rename_func("stddevSamp"),
+            exp.Chr: lambda self, e: self.func("char", e.this),
+            exp.Lag: lambda self, e: self.func(
+                "lagInFrame", e.this, e.args.get("offset"), e.args.get("default")
+            ),
+            exp.Lead: lambda self, e: self.func(
+                "leadInFrame", e.this, e.args.get("offset"), e.args.get("default")
+            ),
         }
 
         PROPERTIES_LOCATION = {
@@ -892,6 +904,7 @@ class ClickHouse(Dialect):
         # There's no list in docs, but it can be found in Clickhouse code
         # see `ClickHouse/src/Parsers/ParserCreate*.cpp`
         ON_CLUSTER_TARGETS = {
+            "SCHEMA",  # Transpiled CREATE SCHEMA may have OnCluster property set
             "DATABASE",
             "TABLE",
             "VIEW",

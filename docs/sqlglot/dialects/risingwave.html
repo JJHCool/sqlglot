@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="generator" content="pdoc 14.6.0"/>
+    <meta name="generator" content="pdoc 14.6.1"/>
     <title>sqlglot.dialects.risingwave API documentation</title>
 
     <style>/*! * Bootstrap Reboot v5.0.0 (https://getbootstrap.com/) * Copyright 2011-2021 The Bootstrap Authors * Copyright 2011-2021 Twitter, Inc. * Licensed under MIT (https://github.com/twbs/bootstrap/blob/main/LICENSE) * Forked from Normalize.css, licensed MIT (https://github.com/necolas/normalize.css/blob/master/LICENSE.md) */*,::after,::before{box-sizing:border-box}@media (prefers-reduced-motion:no-preference){:root{scroll-behavior:smooth}}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Liberation Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";font-size:1rem;font-weight:400;line-height:1.5;color:#212529;background-color:#fff;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}hr{margin:1rem 0;color:inherit;background-color:currentColor;border:0;opacity:.25}hr:not([size]){height:1px}h1,h2,h3,h4,h5,h6{margin-top:0;margin-bottom:.5rem;font-weight:500;line-height:1.2}h1{font-size:calc(1.375rem + 1.5vw)}@media (min-width:1200px){h1{font-size:2.5rem}}h2{font-size:calc(1.325rem + .9vw)}@media (min-width:1200px){h2{font-size:2rem}}h3{font-size:calc(1.3rem + .6vw)}@media (min-width:1200px){h3{font-size:1.75rem}}h4{font-size:calc(1.275rem + .3vw)}@media (min-width:1200px){h4{font-size:1.5rem}}h5{font-size:1.25rem}h6{font-size:1rem}p{margin-top:0;margin-bottom:1rem}abbr[data-bs-original-title],abbr[title]{-webkit-text-decoration:underline dotted;text-decoration:underline dotted;cursor:help;-webkit-text-decoration-skip-ink:none;text-decoration-skip-ink:none}address{margin-bottom:1rem;font-style:normal;line-height:inherit}ol,ul{padding-left:2rem}dl,ol,ul{margin-top:0;margin-bottom:1rem}ol ol,ol ul,ul ol,ul ul{margin-bottom:0}dt{font-weight:700}dd{margin-bottom:.5rem;margin-left:0}blockquote{margin:0 0 1rem}b,strong{font-weight:bolder}small{font-size:.875em}mark{padding:.2em;background-color:#fcf8e3}sub,sup{position:relative;font-size:.75em;line-height:0;vertical-align:baseline}sub{bottom:-.25em}sup{top:-.5em}a{color:#0d6efd;text-decoration:underline}a:hover{color:#0a58ca}a:not([href]):not([class]),a:not([href]):not([class]):hover{color:inherit;text-decoration:none}code,kbd,pre,samp{font-family:SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-size:1em;direction:ltr;unicode-bidi:bidi-override}pre{display:block;margin-top:0;margin-bottom:1rem;overflow:auto;font-size:.875em}pre code{font-size:inherit;color:inherit;word-break:normal}code{font-size:.875em;color:#d63384;word-wrap:break-word}a>code{color:inherit}kbd{padding:.2rem .4rem;font-size:.875em;color:#fff;background-color:#212529;border-radius:.2rem}kbd kbd{padding:0;font-size:1em;font-weight:700}figure{margin:0 0 1rem}img,svg{vertical-align:middle}table{caption-side:bottom;border-collapse:collapse}caption{padding-top:.5rem;padding-bottom:.5rem;color:#6c757d;text-align:left}th{text-align:inherit;text-align:-webkit-match-parent}tbody,td,tfoot,th,thead,tr{border-color:inherit;border-style:solid;border-width:0}label{display:inline-block}button{border-radius:0}button:focus:not(:focus-visible){outline:0}button,input,optgroup,select,textarea{margin:0;font-family:inherit;font-size:inherit;line-height:inherit}button,select{text-transform:none}[role=button]{cursor:pointer}select{word-wrap:normal}select:disabled{opacity:1}[list]::-webkit-calendar-picker-indicator{display:none}[type=button],[type=reset],[type=submit],button{-webkit-appearance:button}[type=button]:not(:disabled),[type=reset]:not(:disabled),[type=submit]:not(:disabled),button:not(:disabled){cursor:pointer}::-moz-focus-inner{padding:0;border-style:none}textarea{resize:vertical}fieldset{min-width:0;padding:0;margin:0;border:0}legend{float:left;width:100%;padding:0;margin-bottom:.5rem;font-size:calc(1.275rem + .3vw);line-height:inherit}@media (min-width:1200px){legend{font-size:1.5rem}}legend+*{clear:left}::-webkit-datetime-edit-day-field,::-webkit-datetime-edit-fields-wrapper,::-webkit-datetime-edit-hour-field,::-webkit-datetime-edit-minute,::-webkit-datetime-edit-month-field,::-webkit-datetime-edit-text,::-webkit-datetime-edit-year-field{padding:0}::-webkit-inner-spin-button{height:auto}[type=search]{outline-offset:-2px;-webkit-appearance:textfield}::-webkit-search-decoration{-webkit-appearance:none}::-webkit-color-swatch-wrapper{padding:0}::file-selector-button{font:inherit}::-webkit-file-upload-button{font:inherit;-webkit-appearance:button}output{display:inline-block}iframe{border:0}summary{display:list-item;cursor:pointer}progress{vertical-align:baseline}[hidden]{display:none!important}</style>
@@ -523,6 +523,10 @@
                 <dd id="RisingWave.SUPPORTS_ORDER_BY_ALL" class="variable"><a href="dialect.html#Dialect.SUPPORTS_ORDER_BY_ALL">SUPPORTS_ORDER_BY_ALL</a></dd>
                 <dd id="RisingWave.HAS_DISTINCT_ARRAY_CONSTRUCTORS" class="variable"><a href="dialect.html#Dialect.HAS_DISTINCT_ARRAY_CONSTRUCTORS">HAS_DISTINCT_ARRAY_CONSTRUCTORS</a></dd>
                 <dd id="RisingWave.SUPPORTS_FIXED_SIZE_ARRAYS" class="variable"><a href="dialect.html#Dialect.SUPPORTS_FIXED_SIZE_ARRAYS">SUPPORTS_FIXED_SIZE_ARRAYS</a></dd>
+                <dd id="RisingWave.STRICT_JSON_PATH_SYNTAX" class="variable"><a href="dialect.html#Dialect.STRICT_JSON_PATH_SYNTAX">STRICT_JSON_PATH_SYNTAX</a></dd>
+                <dd id="RisingWave.ON_CONDITION_EMPTY_BEFORE_ERROR" class="variable"><a href="dialect.html#Dialect.ON_CONDITION_EMPTY_BEFORE_ERROR">ON_CONDITION_EMPTY_BEFORE_ERROR</a></dd>
+                <dd id="RisingWave.ARRAY_AGG_INCLUDES_NULLS" class="variable"><a href="dialect.html#Dialect.ARRAY_AGG_INCLUDES_NULLS">ARRAY_AGG_INCLUDES_NULLS</a></dd>
+                <dd id="RisingWave.SET_OP_DISTINCT_BY_DEFAULT" class="variable"><a href="dialect.html#Dialect.SET_OP_DISTINCT_BY_DEFAULT">SET_OP_DISTINCT_BY_DEFAULT</a></dd>
                 <dd id="RisingWave.CREATABLE_KIND_MAPPING" class="variable"><a href="dialect.html#Dialect.CREATABLE_KIND_MAPPING">CREATABLE_KIND_MAPPING</a></dd>
                 <dd id="RisingWave.DATE_PART_MAPPING" class="variable"><a href="dialect.html#Dialect.DATE_PART_MAPPING">DATE_PART_MAPPING</a></dd>
                 <dd id="RisingWave.TYPE_TO_EXPRESSIONS" class="variable"><a href="dialect.html#Dialect.TYPE_TO_EXPRESSIONS">TYPE_TO_EXPRESSIONS</a></dd>
@@ -697,7 +701,7 @@ Default: True</li>
                                 <dd id="RisingWave.Generator.__init__" class="function"><a href="../generator.html#Generator.__init__">Generator</a></dd>
                 <dd id="RisingWave.Generator.NULL_ORDERING_SUPPORTED" class="variable"><a href="../generator.html#Generator.NULL_ORDERING_SUPPORTED">NULL_ORDERING_SUPPORTED</a></dd>
                 <dd id="RisingWave.Generator.IGNORE_NULLS_IN_FUNC" class="variable"><a href="../generator.html#Generator.IGNORE_NULLS_IN_FUNC">IGNORE_NULLS_IN_FUNC</a></dd>
-                <dd id="RisingWave.Generator.EXPLICIT_SET_OP" class="variable"><a href="../generator.html#Generator.EXPLICIT_SET_OP">EXPLICIT_SET_OP</a></dd>
+                <dd id="RisingWave.Generator.EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE" class="variable"><a href="../generator.html#Generator.EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE">EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE</a></dd>
                 <dd id="RisingWave.Generator.WRAP_DERIVED_VALUES" class="variable"><a href="../generator.html#Generator.WRAP_DERIVED_VALUES">WRAP_DERIVED_VALUES</a></dd>
                 <dd id="RisingWave.Generator.CREATE_FUNCTION_RETURN_AS" class="variable"><a href="../generator.html#Generator.CREATE_FUNCTION_RETURN_AS">CREATE_FUNCTION_RETURN_AS</a></dd>
                 <dd id="RisingWave.Generator.MATCHED_BY_SOURCE" class="variable"><a href="../generator.html#Generator.MATCHED_BY_SOURCE">MATCHED_BY_SOURCE</a></dd>
@@ -820,8 +824,8 @@ Default: True</li>
                 <dd id="RisingWave.Generator.directory_sql" class="function"><a href="../generator.html#Generator.directory_sql">directory_sql</a></dd>
                 <dd id="RisingWave.Generator.delete_sql" class="function"><a href="../generator.html#Generator.delete_sql">delete_sql</a></dd>
                 <dd id="RisingWave.Generator.drop_sql" class="function"><a href="../generator.html#Generator.drop_sql">drop_sql</a></dd>
-                <dd id="RisingWave.Generator.except_sql" class="function"><a href="../generator.html#Generator.except_sql">except_sql</a></dd>
-                <dd id="RisingWave.Generator.except_op" class="function"><a href="../generator.html#Generator.except_op">except_op</a></dd>
+                <dd id="RisingWave.Generator.set_operation" class="function"><a href="../generator.html#Generator.set_operation">set_operation</a></dd>
+                <dd id="RisingWave.Generator.set_operations" class="function"><a href="../generator.html#Generator.set_operations">set_operations</a></dd>
                 <dd id="RisingWave.Generator.fetch_sql" class="function"><a href="../generator.html#Generator.fetch_sql">fetch_sql</a></dd>
                 <dd id="RisingWave.Generator.filter_sql" class="function"><a href="../generator.html#Generator.filter_sql">filter_sql</a></dd>
                 <dd id="RisingWave.Generator.hint_sql" class="function"><a href="../generator.html#Generator.hint_sql">hint_sql</a></dd>
@@ -855,8 +859,6 @@ Default: True</li>
                 <dd id="RisingWave.Generator.withdataproperty_sql" class="function"><a href="../generator.html#Generator.withdataproperty_sql">withdataproperty_sql</a></dd>
                 <dd id="RisingWave.Generator.withsystemversioningproperty_sql" class="function"><a href="../generator.html#Generator.withsystemversioningproperty_sql">withsystemversioningproperty_sql</a></dd>
                 <dd id="RisingWave.Generator.insert_sql" class="function"><a href="../generator.html#Generator.insert_sql">insert_sql</a></dd>
-                <dd id="RisingWave.Generator.intersect_sql" class="function"><a href="../generator.html#Generator.intersect_sql">intersect_sql</a></dd>
-                <dd id="RisingWave.Generator.intersect_op" class="function"><a href="../generator.html#Generator.intersect_op">intersect_op</a></dd>
                 <dd id="RisingWave.Generator.introducer_sql" class="function"><a href="../generator.html#Generator.introducer_sql">introducer_sql</a></dd>
                 <dd id="RisingWave.Generator.kill_sql" class="function"><a href="../generator.html#Generator.kill_sql">kill_sql</a></dd>
                 <dd id="RisingWave.Generator.pseudotype_sql" class="function"><a href="../generator.html#Generator.pseudotype_sql">pseudotype_sql</a></dd>
@@ -878,6 +880,9 @@ Default: True</li>
                 <dd id="RisingWave.Generator.var_sql" class="function"><a href="../generator.html#Generator.var_sql">var_sql</a></dd>
                 <dd id="RisingWave.Generator.into_sql" class="function"><a href="../generator.html#Generator.into_sql">into_sql</a></dd>
                 <dd id="RisingWave.Generator.from_sql" class="function"><a href="../generator.html#Generator.from_sql">from_sql</a></dd>
+                <dd id="RisingWave.Generator.groupingsets_sql" class="function"><a href="../generator.html#Generator.groupingsets_sql">groupingsets_sql</a></dd>
+                <dd id="RisingWave.Generator.rollup_sql" class="function"><a href="../generator.html#Generator.rollup_sql">rollup_sql</a></dd>
+                <dd id="RisingWave.Generator.cube_sql" class="function"><a href="../generator.html#Generator.cube_sql">cube_sql</a></dd>
                 <dd id="RisingWave.Generator.group_sql" class="function"><a href="../generator.html#Generator.group_sql">group_sql</a></dd>
                 <dd id="RisingWave.Generator.having_sql" class="function"><a href="../generator.html#Generator.having_sql">having_sql</a></dd>
                 <dd id="RisingWave.Generator.connect_sql" class="function"><a href="../generator.html#Generator.connect_sql">connect_sql</a></dd>
@@ -919,9 +924,6 @@ Default: True</li>
                 <dd id="RisingWave.Generator.placeholder_sql" class="function"><a href="../generator.html#Generator.placeholder_sql">placeholder_sql</a></dd>
                 <dd id="RisingWave.Generator.subquery_sql" class="function"><a href="../generator.html#Generator.subquery_sql">subquery_sql</a></dd>
                 <dd id="RisingWave.Generator.qualify_sql" class="function"><a href="../generator.html#Generator.qualify_sql">qualify_sql</a></dd>
-                <dd id="RisingWave.Generator.set_operations" class="function"><a href="../generator.html#Generator.set_operations">set_operations</a></dd>
-                <dd id="RisingWave.Generator.union_sql" class="function"><a href="../generator.html#Generator.union_sql">union_sql</a></dd>
-                <dd id="RisingWave.Generator.union_op" class="function"><a href="../generator.html#Generator.union_op">union_op</a></dd>
                 <dd id="RisingWave.Generator.prewhere_sql" class="function"><a href="../generator.html#Generator.prewhere_sql">prewhere_sql</a></dd>
                 <dd id="RisingWave.Generator.where_sql" class="function"><a href="../generator.html#Generator.where_sql">where_sql</a></dd>
                 <dd id="RisingWave.Generator.window_sql" class="function"><a href="../generator.html#Generator.window_sql">window_sql</a></dd>
@@ -1058,6 +1060,8 @@ Default: True</li>
                 <dd id="RisingWave.Generator.dictproperty_sql" class="function"><a href="../generator.html#Generator.dictproperty_sql">dictproperty_sql</a></dd>
                 <dd id="RisingWave.Generator.dictrange_sql" class="function"><a href="../generator.html#Generator.dictrange_sql">dictrange_sql</a></dd>
                 <dd id="RisingWave.Generator.dictsubproperty_sql" class="function"><a href="../generator.html#Generator.dictsubproperty_sql">dictsubproperty_sql</a></dd>
+                <dd id="RisingWave.Generator.duplicatekeyproperty_sql" class="function"><a href="../generator.html#Generator.duplicatekeyproperty_sql">duplicatekeyproperty_sql</a></dd>
+                <dd id="RisingWave.Generator.distributedbyproperty_sql" class="function"><a href="../generator.html#Generator.distributedbyproperty_sql">distributedbyproperty_sql</a></dd>
                 <dd id="RisingWave.Generator.oncluster_sql" class="function"><a href="../generator.html#Generator.oncluster_sql">oncluster_sql</a></dd>
                 <dd id="RisingWave.Generator.clusteredbyproperty_sql" class="function"><a href="../generator.html#Generator.clusteredbyproperty_sql">clusteredbyproperty_sql</a></dd>
                 <dd id="RisingWave.Generator.anyvalue_sql" class="function"><a href="../generator.html#Generator.anyvalue_sql">anyvalue_sql</a></dd>
@@ -1101,6 +1105,13 @@ Default: True</li>
                 <dd id="RisingWave.Generator.explodinggenerateseries_sql" class="function"><a href="../generator.html#Generator.explodinggenerateseries_sql">explodinggenerateseries_sql</a></dd>
                 <dd id="RisingWave.Generator.arrayconcat_sql" class="function"><a href="../generator.html#Generator.arrayconcat_sql">arrayconcat_sql</a></dd>
                 <dd id="RisingWave.Generator.converttimezone_sql" class="function"><a href="../generator.html#Generator.converttimezone_sql">converttimezone_sql</a></dd>
+                <dd id="RisingWave.Generator.json_sql" class="function"><a href="../generator.html#Generator.json_sql">json_sql</a></dd>
+                <dd id="RisingWave.Generator.jsonvalue_sql" class="function"><a href="../generator.html#Generator.jsonvalue_sql">jsonvalue_sql</a></dd>
+                <dd id="RisingWave.Generator.conditionalinsert_sql" class="function"><a href="../generator.html#Generator.conditionalinsert_sql">conditionalinsert_sql</a></dd>
+                <dd id="RisingWave.Generator.multitableinserts_sql" class="function"><a href="../generator.html#Generator.multitableinserts_sql">multitableinserts_sql</a></dd>
+                <dd id="RisingWave.Generator.oncondition_sql" class="function"><a href="../generator.html#Generator.oncondition_sql">oncondition_sql</a></dd>
+                <dd id="RisingWave.Generator.jsonexists_sql" class="function"><a href="../generator.html#Generator.jsonexists_sql">jsonexists_sql</a></dd>
+                <dd id="RisingWave.Generator.arrayagg_sql" class="function"><a href="../generator.html#Generator.arrayagg_sql">arrayagg_sql</a></dd>
 
             </div>
             <div><dt><a href="postgres.html#Postgres.Generator">sqlglot.dialects.postgres.Postgres.Generator</a></dt>

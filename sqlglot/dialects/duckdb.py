@@ -33,6 +33,8 @@ from sqlglot.dialects.dialect import (
     timestrtotime_sql,
     unit_to_var,
     unit_to_str,
+    sha256_sql,
+    build_regexp_extract,
 )
 from sqlglot.helper import seq_get
 from sqlglot.tokens import TokenType
@@ -40,6 +42,14 @@ from sqlglot.tokens import TokenType
 DATETIME_DELTA = t.Union[
     exp.DateAdd, exp.TimeAdd, exp.DatetimeAdd, exp.TsOrDsAdd, exp.DateSub, exp.DatetimeSub
 ]
+
+WINDOW_FUNCS_WITH_IGNORE_NULLS = (
+    exp.FirstValue,
+    exp.LastValue,
+    exp.Lag,
+    exp.Lead,
+    exp.NthValue,
+)
 
 
 def _date_delta_sql(self: DuckDB.Generator, expression: DATETIME_DELTA) -> str:
@@ -254,6 +264,7 @@ class DuckDB(Dialect):
     CONCAT_COALESCE = True
     SUPPORTS_ORDER_BY_ALL = True
     SUPPORTS_FIXED_SIZE_ARRAYS = True
+    STRICT_JSON_PATH_SYNTAX = False
 
     # https://duckdb.org/docs/sql/introduction.html#creating-a-new-table
     NORMALIZATION_STRATEGY = NormalizationStrategy.CASE_INSENSITIVE
@@ -350,9 +361,7 @@ class DuckDB(Dialect):
             ),
             "QUANTILE_CONT": exp.PercentileCont.from_arg_list,
             "QUANTILE_DISC": exp.PercentileDisc.from_arg_list,
-            "REGEXP_EXTRACT": lambda args: exp.RegexpExtract(
-                this=seq_get(args, 0), expression=seq_get(args, 1), group=seq_get(args, 2)
-            ),
+            "REGEXP_EXTRACT": build_regexp_extract,
             "REGEXP_MATCHES": exp.RegexpLike.from_arg_list,
             "REGEXP_REPLACE": lambda args: exp.RegexpReplace(
                 this=seq_get(args, 0),
@@ -376,6 +385,7 @@ class DuckDB(Dialect):
         }
 
         FUNCTIONS.pop("DATE_SUB")
+        FUNCTIONS.pop("GLOB")
 
         FUNCTION_PARSERS = parser.Parser.FUNCTION_PARSERS.copy()
         FUNCTION_PARSERS.pop("DECODE")
@@ -485,6 +495,7 @@ class DuckDB(Dialect):
             exp.CurrentTimestamp: lambda *_: "CURRENT_TIMESTAMP",
             exp.DayOfMonth: rename_func("DAYOFMONTH"),
             exp.DayOfWeek: rename_func("DAYOFWEEK"),
+            exp.DayOfWeekIso: rename_func("ISODOW"),
             exp.DayOfYear: rename_func("DAYOFYEAR"),
             exp.DataType: _datatype_sql,
             exp.Date: _date_sql,
@@ -539,6 +550,7 @@ class DuckDB(Dialect):
             exp.ReturnsProperty: lambda self, e: "TABLE" if isinstance(e.this, exp.Schema) else "",
             exp.Rand: rename_func("RANDOM"),
             exp.SafeDivide: no_safe_divide_sql,
+            exp.SHA2: sha256_sql,
             exp.Split: rename_func("STR_SPLIT"),
             exp.SortArray: _sort_array_sql,
             exp.StrPosition: str_position_sql,
@@ -546,6 +558,7 @@ class DuckDB(Dialect):
                 "EPOCH", self.func("STRPTIME", e.this, self.format_time(e))
             ),
             exp.Struct: _struct_sql,
+            exp.Transform: rename_func("LIST_TRANSFORM"),
             exp.TimeAdd: _date_delta_sql,
             exp.Time: no_time_sql,
             exp.TimeDiff: _timediff_sql,
@@ -907,3 +920,20 @@ class DuckDB(Dialect):
                 return self.sql(select)
 
             return super().unnest_sql(expression)
+
+        def ignorenulls_sql(self, expression: exp.IgnoreNulls) -> str:
+            if isinstance(expression.this, WINDOW_FUNCS_WITH_IGNORE_NULLS):
+                # DuckDB should render IGNORE NULLS only for the general-purpose
+                # window functions that accept it e.g. FIRST_VALUE(... IGNORE NULLS) OVER (...)
+                return super().ignorenulls_sql(expression)
+
+            return self.sql(expression, "this")
+
+        def arraytostring_sql(self, expression: exp.ArrayToString) -> str:
+            this = self.sql(expression, "this")
+            null_text = self.sql(expression, "null")
+
+            if null_text:
+                this = f"LIST_TRANSFORM({this}, x -> COALESCE(x, {null_text}))"
+
+            return self.func("ARRAY_TO_STRING", this, expression.expression)

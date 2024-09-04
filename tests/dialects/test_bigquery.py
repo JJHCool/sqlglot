@@ -108,7 +108,6 @@ LANGUAGE js AS
         self.validate_identity("SELECT * FROM READ_CSV('bla.csv')")
         self.validate_identity("CAST(x AS STRUCT<list ARRAY<INT64>>)")
         self.validate_identity("assert.true(1 = 1)")
-        self.validate_identity("SELECT ARRAY_TO_STRING(list, '--') AS text")
         self.validate_identity("SELECT jsondoc['some_key']")
         self.validate_identity("SELECT `p.d.UdF`(data).* FROM `p.d.t`")
         self.validate_identity("SELECT * FROM `my-project.my-dataset.my-table`")
@@ -370,7 +369,7 @@ LANGUAGE js AS
             },
             write={
                 "bigquery": "SELECT SUM(x IGNORE NULLS) AS x",
-                "duckdb": "SELECT SUM(x IGNORE NULLS) AS x",
+                "duckdb": "SELECT SUM(x) AS x",
                 "postgres": "SELECT SUM(x) IGNORE NULLS AS x",
                 "spark": "SELECT SUM(x) IGNORE NULLS AS x",
                 "snowflake": "SELECT SUM(x) IGNORE NULLS AS x",
@@ -405,7 +404,7 @@ LANGUAGE js AS
             "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a, b DESC LIMIT 10) AS x",
             write={
                 "bigquery": "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a, b DESC LIMIT 10) AS x",
-                "duckdb": "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a NULLS FIRST, b DESC LIMIT 10) AS x",
+                "duckdb": "SELECT ARRAY_AGG(DISTINCT x ORDER BY a NULLS FIRST, b DESC LIMIT 10) AS x",
                 "spark": "SELECT COLLECT_LIST(DISTINCT x ORDER BY a, b DESC LIMIT 10) IGNORE NULLS AS x",
             },
         )
@@ -413,7 +412,7 @@ LANGUAGE js AS
             "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a, b DESC LIMIT 1, 10) AS x",
             write={
                 "bigquery": "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a, b DESC LIMIT 1, 10) AS x",
-                "duckdb": "SELECT ARRAY_AGG(DISTINCT x IGNORE NULLS ORDER BY a NULLS FIRST, b DESC LIMIT 1, 10) AS x",
+                "duckdb": "SELECT ARRAY_AGG(DISTINCT x ORDER BY a NULLS FIRST, b DESC LIMIT 1, 10) AS x",
                 "spark": "SELECT COLLECT_LIST(DISTINCT x ORDER BY a, b DESC LIMIT 1, 10) IGNORE NULLS AS x",
             },
         )
@@ -814,6 +813,7 @@ LANGUAGE js AS
                 "presto": "SHA256(x)",
                 "redshift": "SHA2(x, 256)",
                 "trino": "SHA256(x)",
+                "duckdb": "SHA256(x)",
             },
         )
         self.validate_all(
@@ -1475,6 +1475,20 @@ WHERE
             write={
                 "bigquery": "SELECT PARSE_DATE('%A %b %e %Y', 'Thursday Dec 25 2008')",
                 "duckdb": "SELECT CAST(STRPTIME('Thursday Dec 25 2008', '%A %b %-d %Y') AS DATE)",
+            },
+        )
+        self.validate_all(
+            "SELECT ARRAY_TO_STRING(['cake', 'pie', NULL], '--') AS text",
+            write={
+                "bigquery": "SELECT ARRAY_TO_STRING(['cake', 'pie', NULL], '--') AS text",
+                "duckdb": "SELECT ARRAY_TO_STRING(['cake', 'pie', NULL], '--') AS text",
+            },
+        )
+        self.validate_all(
+            "SELECT ARRAY_TO_STRING(['cake', 'pie', NULL], '--', 'MISSING') AS text",
+            write={
+                "bigquery": "SELECT ARRAY_TO_STRING(['cake', 'pie', NULL], '--', 'MISSING') AS text",
+                "duckdb": "SELECT ARRAY_TO_STRING(LIST_TRANSFORM(['cake', 'pie', NULL], x -> COALESCE(x, 'MISSING')), '--') AS text",
             },
         )
 

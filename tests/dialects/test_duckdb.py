@@ -231,10 +231,6 @@ class TestDuckDB(Validator):
             },
         )
 
-        self.validate_identity("INSERT INTO x BY NAME SELECT 1 AS y")
-        self.validate_identity("SELECT 1 AS x UNION ALL BY NAME SELECT 2 AS x")
-        self.validate_identity("SELECT SUM(x) FILTER (x = 1)", "SELECT SUM(x) FILTER(WHERE x = 1)")
-
         # https://github.com/duckdb/duckdb/releases/tag/v0.8.0
         self.assertEqual(
             parse_one("a / b", read="duckdb").assert_is(exp.Div).sql(dialect="duckdb"), "a / b"
@@ -243,6 +239,10 @@ class TestDuckDB(Validator):
             parse_one("a // b", read="duckdb").assert_is(exp.IntDiv).sql(dialect="duckdb"), "a // b"
         )
 
+        self.validate_identity("INSERT INTO x BY NAME SELECT 1 AS y")
+        self.validate_identity("SELECT 1 AS x UNION ALL BY NAME SELECT 2 AS x")
+        self.validate_identity("SELECT SUM(x) FILTER (x = 1)", "SELECT SUM(x) FILTER(WHERE x = 1)")
+        self.validate_identity("SELECT * FROM GLOB(x)")
         self.validate_identity("SELECT MAP(['key1', 'key2', 'key3'], [10, 20, 30])")
         self.validate_identity("SELECT MAP {'x': 1}")
         self.validate_identity("SELECT (MAP {'x': 1})['x']")
@@ -277,6 +277,15 @@ class TestDuckDB(Validator):
         self.validate_identity("SUMMARIZE tbl").assert_is(exp.Summarize)
         self.validate_identity("SUMMARIZE SELECT * FROM tbl").assert_is(exp.Summarize)
         self.validate_identity("CREATE TABLE tbl_summary AS SELECT * FROM (SUMMARIZE tbl)")
+        self.validate_identity(
+            "SELECT species, island, COUNT(*) FROM t GROUP BY GROUPING SETS (species), GROUPING SETS (island)"
+        )
+        self.validate_identity(
+            "SELECT species, island, COUNT(*) FROM t GROUP BY CUBE (species), CUBE (island)"
+        )
+        self.validate_identity(
+            "SELECT species, island, COUNT(*) FROM t GROUP BY ROLLUP (species), ROLLUP (island)"
+        )
         self.validate_identity(
             "SUMMARIZE TABLE 'https://blobs.duckdb.org/data/Star_Trek-Season_1.csv'"
         ).assert_is(exp.Summarize)
@@ -870,7 +879,7 @@ class TestDuckDB(Validator):
             write={"duckdb": "SELECT (90 * INTERVAL '1' DAY)"},
         )
         self.validate_all(
-            "SELECT ((DATE_TRUNC('DAY', CAST(CAST(DATE_TRUNC('DAY', CURRENT_TIMESTAMP) AS DATE) AS TIMESTAMP) + INTERVAL (0 - ((DAYOFWEEK(CAST(CAST(DATE_TRUNC('DAY', CURRENT_TIMESTAMP) AS DATE) AS TIMESTAMP)) % 7) - 1 + 7) % 7) DAY) + (7 * INTERVAL (-5) DAY))) AS t1",
+            "SELECT ((DATE_TRUNC('DAY', CAST(CAST(DATE_TRUNC('DAY', CURRENT_TIMESTAMP) AS DATE) AS TIMESTAMP) + INTERVAL (0 - ((ISODOW(CAST(CAST(DATE_TRUNC('DAY', CURRENT_TIMESTAMP) AS DATE) AS TIMESTAMP)) % 7) - 1 + 7) % 7) DAY) + (7 * INTERVAL (-5) DAY))) AS t1",
             read={
                 "presto": "SELECT ((DATE_ADD('week', -5, DATE_TRUNC('DAY', DATE_ADD('day', (0 - MOD((DAY_OF_WEEK(CAST(CAST(DATE_TRUNC('DAY', NOW()) AS DATE) AS TIMESTAMP)) % 7) - 1 + 7, 7)), CAST(CAST(DATE_TRUNC('DAY', NOW()) AS DATE) AS TIMESTAMP)))))) AS t1",
             },
@@ -997,6 +1006,13 @@ class TestDuckDB(Validator):
             },
             write={
                 "duckdb": "SELECT * FROM example TABLESAMPLE RESERVOIR (3 ROWS) REPEATABLE (82)",
+            },
+        )
+        self.validate_all(
+            "SELECT * FROM (SELECT * FROM t) AS t1 TABLESAMPLE (1 ROWS), (SELECT * FROM t) AS t2 TABLESAMPLE (2 ROWS)",
+            write={
+                "duckdb": "SELECT * FROM (SELECT * FROM t) AS t1 TABLESAMPLE RESERVOIR (1 ROWS), (SELECT * FROM t) AS t2 TABLESAMPLE RESERVOIR (2 ROWS)",
+                "spark": "SELECT * FROM (SELECT * FROM t) TABLESAMPLE (1 ROWS) AS t1, (SELECT * FROM t) TABLESAMPLE (2 ROWS) AS t2",
             },
         )
 
@@ -1256,3 +1272,20 @@ class TestDuckDB(Validator):
             read={"bigquery": "SELECT @foo"},
             write={"bigquery": "SELECT @foo", "duckdb": "SELECT $foo"},
         )
+
+    def test_ignore_nulls(self):
+        # Note that DuckDB differentiates window functions (e.g. LEAD, LAG) from aggregate functions (e.g. SUM)
+        from sqlglot.dialects.duckdb import WINDOW_FUNCS_WITH_IGNORE_NULLS
+
+        agg_funcs = (exp.Sum, exp.Max, exp.Min)
+
+        for func_type in WINDOW_FUNCS_WITH_IGNORE_NULLS + agg_funcs:
+            func = func_type(this=exp.to_identifier("col"))
+            ignore_null = exp.IgnoreNulls(this=func)
+            windowed_ignore_null = exp.Window(this=ignore_null)
+
+            if func_type in WINDOW_FUNCS_WITH_IGNORE_NULLS:
+                self.assertIn("IGNORE NULLS", windowed_ignore_null.sql("duckdb"))
+            else:
+                self.assertEqual(ignore_null.sql("duckdb"), func.sql("duckdb"))
+                self.assertNotIn("IGNORE NULLS", windowed_ignore_null.sql("duckdb"))

@@ -25,6 +25,7 @@ from sqlglot.dialects.dialect import (
     strposition_to_locate_sql,
     unit_to_var,
     trim_sql,
+    timestrtotime_sql,
 )
 from sqlglot.helper import seq_get
 from sqlglot.tokens import TokenType
@@ -172,7 +173,7 @@ class MySQL(Dialect):
         "%k": "%-H",
         "%l": "%-I",
         "%T": "%H:%M:%S",
-        "%W": "%a",
+        "%W": "%A",
     }
 
     class Tokenizer(tokens.Tokenizer):
@@ -334,6 +335,7 @@ class MySQL(Dialect):
             "VALUES": lambda self: self.expression(
                 exp.Anonymous, this="VALUES", expressions=[self._parse_id_var()]
             ),
+            "JSON_VALUE": lambda self: self._parse_json_value(),
         }
 
         STATEMENT_PARSERS = {
@@ -663,6 +665,21 @@ class MySQL(Dialect):
 
             return self.expression(exp.GroupConcat, this=this, separator=separator)
 
+        def _parse_json_value(self) -> exp.JSONValue:
+            this = self._parse_bitwise()
+            self._match(TokenType.COMMA)
+            path = self._parse_bitwise()
+
+            returning = self._match(TokenType.RETURNING) and self._parse_type()
+
+            return self.expression(
+                exp.JSONValue,
+                this=this,
+                path=self.dialect.to_json_path(path),
+                returning=returning,
+                on_condition=self._parse_on_condition(),
+            )
+
     class Generator(generator.Generator):
         INTERVAL_ALLOWS_PLURAL_FORM = False
         LOCKING_READS_SUPPORTED = True
@@ -678,7 +695,7 @@ class MySQL(Dialect):
         JSON_PATH_BRACKETED_KEY_SUPPORTED = False
         JSON_KEY_VALUE_PAIR_SEP = ","
         SUPPORTS_TO_NUMBER = False
-        PARSE_JSON_NAME = None
+        PARSE_JSON_NAME: t.Optional[str] = None
         PAD_FILL_PATTERN_IS_REQUIRED = True
         WRAP_DERIVED_VALUES = False
 
@@ -728,8 +745,10 @@ class MySQL(Dialect):
             ),
             exp.TimestampSub: date_add_interval_sql("DATE", "SUB"),
             exp.TimeStrToUnix: rename_func("UNIX_TIMESTAMP"),
-            exp.TimeStrToTime: lambda self, e: self.sql(
-                exp.cast(e.this, exp.DataType.Type.DATETIME, copy=True)
+            exp.TimeStrToTime: lambda self, e: timestrtotime_sql(
+                self,
+                e,
+                include_precision=not e.args.get("zone"),
             ),
             exp.TimeToStr: _remove_ts_or_ds_to_date(
                 lambda self, e: self.func("DATE_FORMAT", e.this, self.format_time(e))
@@ -1210,3 +1229,7 @@ class MySQL(Dialect):
             dt = expression.args.get("timestamp")
 
             return self.func("CONVERT_TZ", dt, from_tz, to_tz)
+
+        def attimezone_sql(self, expression: exp.AtTimeZone) -> str:
+            self.unsupported("AT TIME ZONE is not supported by MySQL")
+            return self.sql(expression.this)

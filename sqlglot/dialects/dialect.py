@@ -11,7 +11,7 @@ from sqlglot.generator import Generator
 from sqlglot.helper import AutoName, flatten, is_int, seq_get, subclasses
 from sqlglot.jsonpath import JSONPathTokenizer, parse as parse_json_path
 from sqlglot.parser import Parser
-from sqlglot.time import TIMEZONES, format_time
+from sqlglot.time import TIMEZONES, format_time, subsecond_precision
 from sqlglot.tokens import Token, Tokenizer, TokenType
 from sqlglot.trie import new_trie
 
@@ -363,9 +363,11 @@ class Dialect(metaclass=_Dialect):
         HAVING
             my_id = 1
 
-    In most dialects "my_id" would refer to "data.my_id" (which is done in _qualify_columns()) across the query, except:
-        - BigQuery, which will forward the alias to GROUP BY + HAVING clauses i.e it resolves to "WHERE my_id = 1 GROUP BY id HAVING id = 1"
-        - Clickhouse, which will forward the alias across the query i.e it resolves to "WHERE id = 1 GROUP BY id HAVING id = 1"
+    In most dialects, "my_id" would refer to "data.my_id" across the query, except:
+        - BigQuery, which will forward the alias to GROUP BY + HAVING clauses i.e
+          it resolves to "WHERE my_id = 1 GROUP BY id HAVING id = 1"
+        - Clickhouse, which will forward the alias across the query i.e it resolves
+        to "WHERE id = 1 GROUP BY id HAVING id = 1"
     """
 
     EXPAND_ALIAS_REFS_EARLY_ONLY_IN_GROUP_BY = False
@@ -384,8 +386,31 @@ class Dialect(metaclass=_Dialect):
 
     SUPPORTS_FIXED_SIZE_ARRAYS = False
     """
-    Whether expressions such as x::INT[5] should be parsed as fixed-size array defs/casts e.g. in DuckDB. In
-    dialects which don't support fixed size arrays such as Snowflake, this should be interpreted as a subscript/index operator
+    Whether expressions such as x::INT[5] should be parsed as fixed-size array defs/casts e.g.
+    in DuckDB. In dialects which don't support fixed size arrays such as Snowflake, this should
+    be interpreted as a subscript/index operator.
+    """
+
+    STRICT_JSON_PATH_SYNTAX = True
+    """Whether failing to parse a JSON path expression using the JSONPath dialect will log a warning."""
+
+    ON_CONDITION_EMPTY_BEFORE_ERROR = True
+    """Whether "X ON EMPTY" should come before "X ON ERROR" (for dialects like T-SQL, MySQL, Oracle)."""
+
+    ARRAY_AGG_INCLUDES_NULLS: t.Optional[bool] = True
+    """Whether ArrayAgg needs to filter NULL values."""
+
+    REGEXP_EXTRACT_DEFAULT_GROUP = 0
+    """The default value for the capturing group."""
+
+    SET_OP_DISTINCT_BY_DEFAULT: t.Dict[t.Type[exp.Expression], t.Optional[bool]] = {
+        exp.Except: True,
+        exp.Intersect: True,
+        exp.Union: True,
+    }
+    """
+    Whether a set operation uses DISTINCT by default. This is `None` when either `DISTINCT` or `ALL`
+    must be explicitly specified.
     """
 
     CREATABLE_KIND_MAPPING: dict[str, str] = {}
@@ -528,7 +553,6 @@ class Dialect(metaclass=_Dialect):
         exp.DataType.Type.BIGINT: {
             exp.ApproxDistinct,
             exp.ArraySize,
-            exp.Count,
             exp.Length,
         },
         exp.DataType.Type.BOOLEAN: {
@@ -649,6 +673,9 @@ class Dialect(metaclass=_Dialect):
         exp.Cast: lambda self, e: self._annotate_with_type(e, e.args["to"]),
         exp.Case: lambda self, e: self._annotate_by_args(e, "default", "ifs"),
         exp.Coalesce: lambda self, e: self._annotate_by_args(e, "this", "expressions"),
+        exp.Count: lambda self, e: self._annotate_with_type(
+            e, exp.DataType.Type.BIGINT if e.args.get("big_int") else exp.DataType.Type.INT
+        ),
         exp.DataType: lambda self, e: self._annotate_with_type(e, e.copy()),
         exp.DateAdd: lambda self, e: self._annotate_timeunit(e),
         exp.DateSub: lambda self, e: self._annotate_timeunit(e),
@@ -886,7 +913,8 @@ class Dialect(metaclass=_Dialect):
             try:
                 return parse_json_path(path_text, self)
             except ParseError as e:
-                logger.warning(f"Invalid JSON path syntax. {str(e)}")
+                if self.STRICT_JSON_PATH_SYNTAX:
+                    logger.warning(f"Invalid JSON path syntax. {str(e)}")
 
         return path
 
@@ -1021,6 +1049,10 @@ def no_comment_column_constraint_sql(
 def no_map_from_entries_sql(self: Generator, expression: exp.MapFromEntries) -> str:
     self.unsupported("MAP_FROM_ENTRIES unsupported")
     return ""
+
+
+def property_sql(self: Generator, expression: exp.Property) -> str:
+    return f"{self.property_name(expression, string_key=True)}={self.sql(expression, 'value')}"
 
 
 def str_position_sql(
@@ -1243,12 +1275,23 @@ def right_to_substring_sql(self: Generator, expression: exp.Left) -> str:
     )
 
 
-def timestrtotime_sql(self: Generator, expression: exp.TimeStrToTime) -> str:
-    datatype = (
+def timestrtotime_sql(
+    self: Generator,
+    expression: exp.TimeStrToTime,
+    include_precision: bool = False,
+) -> str:
+    datatype = exp.DataType.build(
         exp.DataType.Type.TIMESTAMPTZ
         if expression.args.get("zone")
         else exp.DataType.Type.TIMESTAMP
     )
+
+    if isinstance(expression.this, exp.Literal) and include_precision:
+        precision = subsecond_precision(expression.this.name)
+        if precision > 0:
+            datatype = exp.DataType.build(
+                datatype.this, expressions=[exp.DataTypeParam(this=exp.Literal.number(precision))]
+            )
 
     return self.sql(exp.cast(expression.this, datatype, dialect=self.dialect))
 
@@ -1328,9 +1371,13 @@ def regexp_extract_sql(self: Generator, expression: exp.RegexpExtract) -> str:
     if bad_args:
         self.unsupported(f"REGEXP_EXTRACT does not support the following arg(s): {bad_args}")
 
-    return self.func(
-        "REGEXP_EXTRACT", expression.this, expression.expression, expression.args.get("group")
-    )
+    group = expression.args.get("group")
+
+    # Do not render group if it's the default value for this dialect
+    if group and group.name == str(self.dialect.REGEXP_EXTRACT_DEFAULT_GROUP):
+        group = None
+
+    return self.func("REGEXP_EXTRACT", expression.this, expression.expression, group)
 
 
 def regexp_replace_sql(self: Generator, expression: exp.RegexpReplace) -> str:
@@ -1650,3 +1697,11 @@ def sequence_sql(self: Generator, expression: exp.GenerateSeries | exp.GenerateD
             start = exp.cast(start, target_type)
 
     return self.func("SEQUENCE", start, end, step)
+
+
+def build_regexp_extract(args: t.List, dialect: Dialect) -> exp.RegexpExtract:
+    return exp.RegexpExtract(
+        this=seq_get(args, 0),
+        expression=seq_get(args, 1),
+        group=seq_get(args, 2) or exp.Literal.number(dialect.REGEXP_EXTRACT_DEFAULT_GROUP),
+    )

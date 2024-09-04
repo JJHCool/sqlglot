@@ -412,6 +412,7 @@ class TestHive(Validator):
         )
 
     def test_hive(self):
+        self.validate_identity("SELECT * FROM t WHERE col IN ('stream')")
         self.validate_identity("SET hiveconf:some_var = 5", check_command_warning=True)
         self.validate_identity("(VALUES (1 AS a, 2 AS b, 3))")
         self.validate_identity("SELECT * FROM my_table TIMESTAMP AS OF DATE_ADD(CURRENT_DATE, -1)")
@@ -715,8 +716,8 @@ class TestHive(Validator):
                 "presto": "ARRAY_AGG(x)",
             },
             write={
-                "duckdb": "ARRAY_AGG(x)",
-                "presto": "ARRAY_AGG(x)",
+                "duckdb": "ARRAY_AGG(x) FILTER(WHERE x IS NOT NULL)",
+                "presto": "ARRAY_AGG(x) FILTER(WHERE x IS NOT NULL)",
                 "hive": "COLLECT_LIST(x)",
                 "spark": "COLLECT_LIST(x)",
             },
@@ -762,6 +763,24 @@ class TestHive(Validator):
             },
             write={
                 "presto": "SELECT DATE_TRUNC('MONTH', TRY_CAST(ds AS TIMESTAMP)) AS mm FROM tbl WHERE ds BETWEEN '2023-10-01' AND '2024-02-29'",
+            },
+        )
+        self.validate_all(
+            "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+            read={
+                "hive": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "spark2": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "spark": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "databricks": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+            },
+            write={
+                "hive": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "spark2": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "spark": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "databricks": "REGEXP_EXTRACT('abc', '(a)(b)(c)')",
+                "presto": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 1)",
+                "trino": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 1)",
+                "duckdb": "REGEXP_EXTRACT('abc', '(a)(b)(c)', 1)",
             },
         )
 

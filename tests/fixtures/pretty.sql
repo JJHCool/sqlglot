@@ -99,14 +99,14 @@ WITH cte1 AS (
       FOO(CASE WHEN a AND b THEN c AND d ELSE 3 END)
     GROUP BY
       x,
-    GROUPING SETS (
-      a,
-      (b, c)
-    ),
-    CUBE (
-      y,
-      z
-    )
+      GROUPING SETS (
+        a,
+        (b, c)
+      ),
+      CUBE (
+        y,
+        z
+      )
   ) AS x
 )
 SELECT
@@ -405,3 +405,16 @@ JOIN b
   'eeeeeeeeeeeeeeeeeeeee'
 );
 
+/* COMMENT */
+INSERT FIRST WHEN salary > 4000 THEN INTO emp2
+             WHEN salary > 5000 THEN INTO emp3
+             WHEN salary > 6000 THEN INTO emp4
+SELECT salary FROM employees;
+/* COMMENT */
+INSERT FIRST
+  WHEN salary > 4000 THEN INTO emp2
+  WHEN salary > 5000 THEN INTO emp3
+  WHEN salary > 6000 THEN INTO emp4
+SELECT
+  salary
+FROM employees;

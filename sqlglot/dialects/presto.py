@@ -29,6 +29,7 @@ from sqlglot.dialects.dialect import (
     ts_or_ds_add_cast,
     unit_to_str,
     sequence_sql,
+    build_regexp_extract,
 )
 from sqlglot.dialects.hive import Hive
 from sqlglot.dialects.mysql import MySQL
@@ -240,10 +241,7 @@ class Presto(Dialect):
     TABLESAMPLE_SIZE_IS_PERCENT = True
     LOG_BASE_FIRST: t.Optional[bool] = None
 
-    TIME_MAPPING = {
-        **MySQL.TIME_MAPPING,
-        "%W": "%A",
-    }
+    TIME_MAPPING = MySQL.TIME_MAPPING
 
     # https://github.com/trinodb/trino/issues/17
     # https://github.com/trinodb/trino/issues/12289
@@ -308,6 +306,7 @@ class Presto(Dialect):
             "DATE_FORMAT": build_formatted_time(exp.TimeToStr, "presto"),
             "DATE_PARSE": build_formatted_time(exp.StrToTime, "presto"),
             "DATE_TRUNC": date_trunc_to_time,
+            "DAY_OF_WEEK": exp.DayOfWeekIso.from_arg_list,
             "ELEMENT_AT": lambda args: exp.Bracket(
                 this=seq_get(args, 0), expressions=[seq_get(args, 1)], offset=1, safe=True
             ),
@@ -317,9 +316,7 @@ class Presto(Dialect):
                 this=seq_get(args, 0), replace=seq_get(args, 1), charset=exp.Literal.string("utf-8")
             ),
             "NOW": exp.CurrentTimestamp.from_arg_list,
-            "REGEXP_EXTRACT": lambda args: exp.RegexpExtract(
-                this=seq_get(args, 0), expression=seq_get(args, 1), group=seq_get(args, 2)
-            ),
+            "REGEXP_EXTRACT": build_regexp_extract,
             "REGEXP_REPLACE": lambda args: exp.RegexpReplace(
                 this=seq_get(args, 0),
                 expression=seq_get(args, 1),
@@ -362,6 +359,7 @@ class Presto(Dialect):
         HEX_FUNC = "TO_HEX"
         PARSE_JSON_NAME = "JSON_PARSE"
         PAD_FILL_PATTERN_IS_REQUIRED = True
+        EXCEPT_INTERSECT_SUPPORT_ALL_CLAUSE = False
 
         PROPERTIES_LOCATION = {
             **generator.Generator.PROPERTIES_LOCATION,
@@ -417,6 +415,8 @@ class Presto(Dialect):
             exp.DateToDi: lambda self,
             e: f"CAST(DATE_FORMAT({self.sql(e, 'this')}, {Presto.DATEINT_FORMAT}) AS INT)",
             exp.DateSub: _date_delta_sql("DATE_ADD", negate_interval=True),
+            exp.DayOfWeek: lambda self, e: f"(({self.func('DAY_OF_WEEK', e.this)} % 7) + 1)",
+            exp.DayOfWeekIso: rename_func("DAY_OF_WEEK"),
             exp.Decode: lambda self, e: encode_decode_sql(self, e, "FROM_UTF8"),
             exp.DiToDate: lambda self,
             e: f"CAST(DATE_PARSE(CAST({self.sql(e, 'this')} AS VARCHAR), {Presto.DATEINT_FORMAT}) AS DATE)",

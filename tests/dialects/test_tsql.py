@@ -32,6 +32,9 @@ class TestTSQL(Validator):
         self.validate_identity("CAST(x AS int) OR y", "CAST(x AS INTEGER) <> 0 OR y <> 0")
         self.validate_identity("TRUNCATE TABLE t1 WITH (PARTITIONS(1, 2 TO 5, 10 TO 20, 84))")
         self.validate_identity(
+            "SELECT TOP 10 s.RECORDID, n.c.value('(/*:FORM_ROOT/*:SOME_TAG)[1]', 'float') AS SOME_TAG_VALUE FROM source_table.dbo.source_data AS s(nolock) CROSS APPLY FormContent.nodes('/*:FORM_ROOT') AS N(C)"
+        )
+        self.validate_identity(
             "CREATE CLUSTERED INDEX [IX_OfficeTagDetail_TagDetailID] ON [dbo].[OfficeTagDetail]([TagDetailID] ASC)"
         )
         self.validate_identity(
@@ -410,6 +413,12 @@ class TestTSQL(Validator):
                 "": "STDDEV(x)",
                 "tsql": "STDEV(x)",
             },
+        )
+
+        # Check that TRUE and FALSE dont get expanded to (1=1) or (1=0) when used in a VALUES expression
+        self.validate_identity(
+            "SELECT val FROM (VALUES ((TRUE), (FALSE), (NULL))) AS t(val)",
+            write_sql="SELECT val FROM (VALUES ((1), (0), (NULL))) AS t(val)",
         )
 
     def test_option(self):
@@ -1577,8 +1586,8 @@ WHERE
         self.validate_all(
             "SELECT t.x, y.z FROM x OUTER APPLY a.b.tvfTest(t.x)y(z)",
             write={
-                "spark": "SELECT t.x, y.z FROM x LEFT JOIN LATERAL a.b.TVFTEST(t.x) AS y(z)",
-                "tsql": "SELECT t.x, y.z FROM x OUTER APPLY a.b.TVFTEST(t.x) AS y(z)",
+                "spark": "SELECT t.x, y.z FROM x LEFT JOIN LATERAL a.b.tvfTest(t.x) AS y(z)",
+                "tsql": "SELECT t.x, y.z FROM x OUTER APPLY a.b.tvfTest(t.x) AS y(z)",
             },
         )
 
@@ -1692,7 +1701,7 @@ WHERE
                 "duckdb": "LAST_DAY(CAST(CURRENT_TIMESTAMP AS DATE) + INTERVAL (-1) MONTH)",
                 "mysql": "LAST_DAY(DATE_ADD(CURRENT_TIMESTAMP(), INTERVAL -1 MONTH))",
                 "postgres": "CAST(DATE_TRUNC('MONTH', CAST(CURRENT_TIMESTAMP AS DATE) + INTERVAL '-1 MONTH') + INTERVAL '1 MONTH' - INTERVAL '1 DAY' AS DATE)",
-                "presto": "LAST_DAY_OF_MONTH(DATE_ADD('MONTH', CAST(-1 AS BIGINT), CAST(CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS DATE)))",
+                "presto": "LAST_DAY_OF_MONTH(DATE_ADD('MONTH', -1, CAST(CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS DATE)))",
                 "redshift": "LAST_DAY(DATEADD(MONTH, -1, CAST(GETDATE() AS DATE)))",
                 "snowflake": "LAST_DAY(DATEADD(MONTH, -1, TO_DATE(CURRENT_TIMESTAMP())))",
                 "spark": "LAST_DAY(ADD_MONTHS(TO_DATE(CURRENT_TIMESTAMP()), -1))",
@@ -1956,3 +1965,31 @@ FROM OPENJSON(@json) WITH (
                 base_sql = expr.sql()
                 self.assertEqual(base_sql, f"SCOPE_RESOLUTION({lhs + ', ' if lhs else ''}{rhs})")
                 self.assertEqual(parse_one(base_sql).sql("tsql"), f"{lhs}::{rhs}")
+
+    def test_count(self):
+        count = annotate_types(self.validate_identity("SELECT COUNT(1) FROM x"))
+        self.assertEqual(count.expressions[0].type.this, exp.DataType.Type.INT)
+
+        count_big = annotate_types(self.validate_identity("SELECT COUNT_BIG(1) FROM x"))
+        self.assertEqual(count_big.expressions[0].type.this, exp.DataType.Type.BIGINT)
+
+        self.validate_all(
+            "SELECT COUNT_BIG(1) FROM x",
+            read={
+                "duckdb": "SELECT COUNT(1) FROM x",
+                "spark": "SELECT COUNT(1) FROM x",
+            },
+            write={
+                "duckdb": "SELECT COUNT(1) FROM x",
+                "spark": "SELECT COUNT(1) FROM x",
+                "tsql": "SELECT COUNT_BIG(1) FROM x",
+            },
+        )
+        self.validate_all(
+            "SELECT COUNT(1) FROM x",
+            write={
+                "duckdb": "SELECT COUNT(1) FROM x",
+                "spark": "SELECT COUNT(1) FROM x",
+                "tsql": "SELECT COUNT(1) FROM x",
+            },
+        )
