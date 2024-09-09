@@ -20,7 +20,9 @@ class Validator(unittest.TestCase):
     def parse_one(self, sql, **kwargs):
         return parse_one(sql, read=self.dialect, **kwargs)
 
-    def validate_identity(self, sql, write_sql=None, pretty=False, check_command_warning=False):
+    def validate_identity(
+        self, sql, write_sql=None, pretty=False, check_command_warning=False, identify=False
+    ):
         if check_command_warning:
             with self.assertLogs(parser_logger) as cm:
                 expression = self.parse_one(sql)
@@ -28,7 +30,9 @@ class Validator(unittest.TestCase):
         else:
             expression = self.parse_one(sql)
 
-        self.assertEqual(write_sql or sql, expression.sql(dialect=self.dialect, pretty=pretty))
+        self.assertEqual(
+            write_sql or sql, expression.sql(dialect=self.dialect, pretty=pretty, identify=identify)
+        )
         return expression
 
     def validate_all(self, sql, read=None, write=None, pretty=False, identify=False):
@@ -1784,6 +1788,13 @@ class TestDialect(Validator):
             },
         )
         self.validate_all(
+            "FILTER(the_array, x -> x > 0)",
+            write={
+                "presto": "FILTER(the_array, x -> x > 0)",
+                "starrocks": "ARRAY_FILTER(the_array, x -> x > 0)",
+            },
+        )
+        self.validate_all(
             "a / b",
             write={
                 "bigquery": "a / b",
@@ -2802,3 +2813,81 @@ FROM subquery2""",
 
         # Check T-SQL's ISNULL which is parsed into exp.Coalesce
         self.assertIsInstance(parse_one("ISNULL(x, y)", read="tsql").expressions, list)
+
+    def test_trim(self):
+        self.validate_all(
+            "TRIM('abc', 'a')",
+            read={
+                "bigquery": "TRIM('abc', 'a')",
+                "snowflake": "TRIM('abc', 'a')",
+            },
+            write={
+                "bigquery": "TRIM('abc', 'a')",
+                "snowflake": "TRIM('abc', 'a')",
+            },
+        )
+
+        self.validate_all(
+            "LTRIM('Hello World', 'H')",
+            read={
+                "oracle": "LTRIM('Hello World', 'H')",
+                "clickhouse": "TRIM(LEADING 'H' FROM 'Hello World')",
+                "snowflake": "LTRIM('Hello World', 'H')",
+                "bigquery": "LTRIM('Hello World', 'H')",
+                "": "LTRIM('Hello World', 'H')",
+            },
+            write={
+                "clickhouse": "TRIM(LEADING 'H' FROM 'Hello World')",
+                "oracle": "LTRIM('Hello World', 'H')",
+                "snowflake": "LTRIM('Hello World', 'H')",
+                "bigquery": "LTRIM('Hello World', 'H')",
+            },
+        )
+
+        self.validate_all(
+            "RTRIM('Hello World', 'd')",
+            read={
+                "clickhouse": "TRIM(TRAILING 'd' FROM 'Hello World')",
+                "oracle": "RTRIM('Hello World', 'd')",
+                "snowflake": "RTRIM('Hello World', 'd')",
+                "bigquery": "RTRIM('Hello World', 'd')",
+                "": "RTRIM('Hello World', 'd')",
+            },
+            write={
+                "clickhouse": "TRIM(TRAILING 'd' FROM 'Hello World')",
+                "oracle": "RTRIM('Hello World', 'd')",
+                "snowflake": "RTRIM('Hello World', 'd')",
+                "bigquery": "RTRIM('Hello World', 'd')",
+            },
+        )
+
+    def test_uuid(self):
+        self.validate_all(
+            "UUID()",
+            read={
+                "hive": "UUID()",
+                "spark2": "UUID()",
+                "spark": "UUID()",
+                "databricks": "UUID()",
+                "duckdb": "UUID()",
+                "presto": "UUID()",
+                "trino": "UUID()",
+                "mysql": "UUID()",
+                "postgres": "GEN_RANDOM_UUID()",
+                "bigquery": "GENERATE_UUID()",
+                "snowflake": "UUID_STRING()",
+            },
+            write={
+                "hive": "UUID()",
+                "spark2": "UUID()",
+                "spark": "UUID()",
+                "databricks": "UUID()",
+                "duckdb": "UUID()",
+                "presto": "UUID()",
+                "trino": "UUID()",
+                "mysql": "UUID()",
+                "postgres": "GEN_RANDOM_UUID()",
+                "bigquery": "GENERATE_UUID()",
+                "snowflake": "UUID_STRING()",
+            },
+        )

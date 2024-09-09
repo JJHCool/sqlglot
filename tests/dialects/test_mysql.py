@@ -82,6 +82,10 @@ class TestMySQL(Validator):
             "CREATE OR REPLACE VIEW my_view AS SELECT column1 AS `boo`, column2 AS `foo` FROM my_table WHERE column3 = 'some_value' UNION SELECT q.* FROM fruits_table, JSON_TABLE(Fruits, '$[*]' COLUMNS(id VARCHAR(255) PATH '$.$id', value VARCHAR(255) PATH '$.value')) AS q",
         )
         self.validate_identity(
+            "CREATE TABLE t (name VARCHAR)",
+            "CREATE TABLE t (name TEXT)",
+        )
+        self.validate_identity(
             "ALTER TABLE t ADD KEY `i` (`c`)",
             "ALTER TABLE t ADD INDEX `i` (`c`)",
         )
@@ -176,6 +180,10 @@ class TestMySQL(Validator):
             "REPLACE INTO table SELECT id FROM table2 WHERE cnt > 100", check_command_warning=True
         )
         self.validate_identity(
+            "CAST(x AS VARCHAR)",
+            "CAST(x AS CHAR)",
+        )
+        self.validate_identity(
             """SELECT * FROM foo WHERE 3 MEMBER OF(info->'$.value')""",
             """SELECT * FROM foo WHERE 3 MEMBER OF(JSON_EXTRACT(info, '$.value'))""",
         )
@@ -241,7 +249,7 @@ class TestMySQL(Validator):
             "SET @@GLOBAL.sort_buffer_size = 1000000, @@LOCAL.sort_buffer_size = 1000000"
         )
         self.validate_identity("INTERVAL '1' YEAR")
-        self.validate_identity("DATE_ADD(x, INTERVAL 1 YEAR)")
+        self.validate_identity("DATE_ADD(x, INTERVAL '1' YEAR)")
         self.validate_identity("CHAR(0)")
         self.validate_identity("CHAR(77, 121, 83, 81, '76')")
         self.validate_identity("CHAR(77, 77.3, '77.3' USING utf8mb4)")

@@ -403,6 +403,9 @@ class ClickHouse(Dialect):
         NO_PAREN_FUNCTION_PARSERS = parser.Parser.NO_PAREN_FUNCTION_PARSERS.copy()
         NO_PAREN_FUNCTION_PARSERS.pop("ANY")
 
+        NO_PAREN_FUNCTIONS = parser.Parser.NO_PAREN_FUNCTIONS.copy()
+        NO_PAREN_FUNCTIONS.pop(TokenType.CURRENT_TIMESTAMP)
+
         RANGE_PARSERS = {
             **parser.Parser.RANGE_PARSERS,
             TokenType.GLOBAL: lambda self, this: self._match(TokenType.IN)
@@ -471,12 +474,12 @@ class ClickHouse(Dialect):
             dtype = super()._parse_types(
                 check_func=check_func, schema=schema, allow_identifiers=allow_identifiers
             )
-            if isinstance(dtype, exp.DataType):
-                # Mark every type as non-nullable which is ClickHouse's default. This marker
-                # helps us transpile types from other dialects to ClickHouse, so that we can
-                # e.g. produce `CAST(x AS Nullable(String))` from `CAST(x AS TEXT)`. If there
-                # is a `NULL` value in `x`, the former would fail in ClickHouse without the
-                # `Nullable` type constructor
+            if isinstance(dtype, exp.DataType) and dtype.args.get("nullable") is not True:
+                # Mark every type as non-nullable which is ClickHouse's default, unless it's
+                # already marked as nullable. This marker helps us transpile types from other
+                # dialects to ClickHouse, so that we can e.g. produce `CAST(x AS Nullable(String))`
+                # from `CAST(x AS TEXT)`. If there is a `NULL` value in `x`, the former would
+                # fail in ClickHouse without the `Nullable` type constructor.
                 dtype.set("nullable", False)
 
             return dtype
@@ -812,7 +815,6 @@ class ClickHouse(Dialect):
             exp.DataType.Type.LOWCARDINALITY: "LowCardinality",
             exp.DataType.Type.MAP: "Map",
             exp.DataType.Type.NESTED: "Nested",
-            exp.DataType.Type.NULLABLE: "Nullable",
             exp.DataType.Type.SMALLINT: "Int16",
             exp.DataType.Type.STRUCT: "Tuple",
             exp.DataType.Type.TINYINT: "Int8",
@@ -885,7 +887,7 @@ class ClickHouse(Dialect):
             exp.Variance: rename_func("varSamp"),
             exp.SchemaCommentProperty: lambda self, e: self.naked_property(e),
             exp.Stddev: rename_func("stddevSamp"),
-            exp.Chr: lambda self, e: self.func("char", e.this),
+            exp.Chr: rename_func("CHAR"),
             exp.Lag: lambda self, e: self.func(
                 "lagInFrame", e.this, e.args.get("offset"), e.args.get("default")
             ),
@@ -918,7 +920,6 @@ class ClickHouse(Dialect):
         NON_NULLABLE_TYPES = {
             exp.DataType.Type.ARRAY,
             exp.DataType.Type.MAP,
-            exp.DataType.Type.NULLABLE,
             exp.DataType.Type.STRUCT,
         }
 
@@ -1001,8 +1002,9 @@ class ClickHouse(Dialect):
             #   String or FixedString (possibly LowCardinality) or UUID or IPv6"
             # - It's not a composite type, e.g. `Nullable(Array(...))` is not a valid type
             parent = expression.parent
-            if (
-                expression.args.get("nullable") is not False
+            nullable = expression.args.get("nullable")
+            if nullable is True or (
+                nullable is None
                 and not (
                     isinstance(parent, exp.DataType)
                     and parent.is_type(exp.DataType.Type.MAP, check_nullable=True)

@@ -4118,7 +4118,6 @@ class DataType(Expression):
         NCHAR = auto()
         NESTED = auto()
         NULL = auto()
-        NULLABLE = auto()
         NUMMULTIRANGE = auto()
         NUMRANGE = auto()
         NVARCHAR = auto()
@@ -4312,32 +4311,19 @@ class DataType(Expression):
         Returns:
             True, if and only if there is a type in `dtypes` which is equal to this DataType.
         """
-        if (
-            not check_nullable
-            and self.this == DataType.Type.NULLABLE
-            and len(self.expressions) == 1
-        ):
-            this_type = self.expressions[0]
-        else:
-            this_type = self
-
+        self_is_nullable = self.args.get("nullable")
         for dtype in dtypes:
             other_type = DataType.build(dtype, copy=False, udt=True)
-            if (
-                not check_nullable
-                and other_type.this == DataType.Type.NULLABLE
-                and len(other_type.expressions) == 1
-            ):
-                other_type = other_type.expressions[0]
-
+            other_is_nullable = other_type.args.get("nullable")
             if (
                 other_type.expressions
-                or this_type.this == DataType.Type.USERDEFINED
+                or (check_nullable and (self_is_nullable or other_is_nullable))
+                or self.this == DataType.Type.USERDEFINED
                 or other_type.this == DataType.Type.USERDEFINED
             ):
-                matches = this_type == other_type
+                matches = self == other_type
             else:
-                matches = this_type.this == other_type.this
+                matches = self.this == other_type.this
 
             if matches:
                 return True
@@ -4401,6 +4387,7 @@ class Alter(Expression):
         "only": False,
         "options": False,
         "cluster": False,
+        "not_valid": False,
     }
 
 
@@ -5171,7 +5158,7 @@ class Coalesce(Func):
 
 
 class Chr(Func):
-    arg_types = {"this": True, "charset": False, "expressions": False}
+    arg_types = {"expressions": True, "charset": False}
     is_var_len_args = True
     _sql_names = ["CHR", "CHAR"]
 
@@ -6216,6 +6203,12 @@ class UnixToTimeStr(Func):
     pass
 
 
+class Uuid(Func):
+    _sql_names = ["UUID", "GEN_RANDOM_UUID", "GENERATE_UUID", "UUID_STRING"]
+
+    arg_types = {"this": False, "name": False}
+
+
 class TimestampFromParts(Func):
     _sql_names = ["TIMESTAMP_FROM_PARTS", "TIMESTAMPFROMPARTS"]
     arg_types = {
@@ -6278,6 +6271,7 @@ class Merge(Expression):
         "on": True,
         "expressions": True,
         "with": False,
+        "returning": False,
     }
 
 
@@ -6882,6 +6876,49 @@ def insert(
         insert = t.cast(Insert, insert.returning(returning, dialect=dialect, copy=False, **opts))
 
     return insert
+
+
+def merge(
+    *when_exprs: ExpOrStr,
+    into: ExpOrStr,
+    using: ExpOrStr,
+    on: ExpOrStr,
+    dialect: DialectType = None,
+    copy: bool = True,
+    **opts,
+) -> Merge:
+    """
+    Builds a MERGE statement.
+
+    Example:
+        >>> merge("WHEN MATCHED THEN UPDATE SET col1 = source_table.col1",
+        ...       "WHEN NOT MATCHED THEN INSERT (col1) VALUES (source_table.col1)",
+        ...       into="my_table",
+        ...       using="source_table",
+        ...       on="my_table.id = source_table.id").sql()
+        'MERGE INTO my_table USING source_table ON my_table.id = source_table.id WHEN MATCHED THEN UPDATE SET col1 = source_table.col1 WHEN NOT MATCHED THEN INSERT (col1) VALUES (source_table.col1)'
+
+    Args:
+        *when_exprs: The WHEN clauses specifying actions for matched and unmatched rows.
+        into: The target table to merge data into.
+        using: The source table to merge data from.
+        on: The join condition for the merge.
+        dialect: The dialect used to parse the input expressions.
+        copy: Whether to copy the expression.
+        **opts: Other options to use to parse the input expressions.
+
+    Returns:
+        Merge: The syntax tree for the MERGE statement.
+    """
+    return Merge(
+        this=maybe_parse(into, dialect=dialect, copy=copy, **opts),
+        using=maybe_parse(using, dialect=dialect, copy=copy, **opts),
+        on=maybe_parse(on, dialect=dialect, copy=copy, **opts),
+        expressions=[
+            maybe_parse(when_expr, dialect=dialect, copy=copy, into=When, **opts)
+            for when_expr in when_exprs
+        ],
+    )
 
 
 def condition(
